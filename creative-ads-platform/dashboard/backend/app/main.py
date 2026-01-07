@@ -142,7 +142,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 
 # Include routers
-app.include_router(health_router)
+app.include_router(health_router, prefix="/api/v1")
 app.include_router(jobs_router, prefix="/api/v1")
 app.include_router(assets_router, prefix="/api/v1")
 app.include_router(metrics_router, prefix="/api/v1")
