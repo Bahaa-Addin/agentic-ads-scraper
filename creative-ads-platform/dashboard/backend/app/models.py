@@ -31,8 +31,10 @@ class JobType(str, Enum):
     EXTRACT_FEATURES = "extract_features"
     GENERATE_PROMPT = "generate_prompt"
     CLASSIFY_INDUSTRY = "classify_industry"
+    CLASSIFY = "classify"  # Alias for classify_industry
     STORE_ASSET = "store_asset"
     BATCH_PROCESS = "batch_process"
+    FULL_PIPELINE = "full_pipeline"  # Complete pipeline run
 
 
 class ScraperSource(str, Enum):

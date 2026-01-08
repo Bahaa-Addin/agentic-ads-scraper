@@ -16,6 +16,7 @@ import {
   X,
   Home,
   Zap,
+  Play,
 } from 'lucide-react'
 import { useState } from 'react'
 import { getHealth } from '@/lib/api'
@@ -23,6 +24,7 @@ import { cn } from '@/lib/utils'
 
 const navigation = [
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
+  { name: 'Pipeline', href: '/pipeline', icon: Play, highlight: true },
   { name: 'Jobs', href: '/jobs', icon: ListTodo },
   { name: 'Assets', href: '/assets', icon: Image },
   { name: 'Scrapers', href: '/scrapers', icon: Radar },
@@ -85,6 +87,7 @@ export default function Layout() {
           {navigation.map((item) => {
             const isActive = location.pathname === item.href || 
               (item.href !== '/dashboard' && location.pathname.startsWith(item.href))
+            const isHighlighted = 'highlight' in item && item.highlight
             return (
               <NavLink
                 key={item.name}
@@ -94,11 +97,16 @@ export default function Layout() {
                   'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200',
                   isActive
                     ? 'bg-brand-500/20 text-brand-400'
+                    : isHighlighted
+                    ? 'text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10'
                     : 'text-surface-400 hover:text-white hover:bg-surface-800'
                 )}
               >
                 <item.icon className="w-5 h-5" />
                 {item.name}
+                {isHighlighted && !isActive && (
+                  <span className="ml-auto w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                )}
               </NavLink>
             )
           })}

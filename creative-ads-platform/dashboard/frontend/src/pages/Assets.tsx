@@ -10,7 +10,12 @@ import {
   Copy,
   Check,
   Image as ImageIcon,
+  Sparkles,
+  FileText,
+  Tag,
 } from 'lucide-react'
+import { useMutation } from '@tanstack/react-query'
+import * as apiClient from '@/lib/api'
 import { Card, CardContent } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Select } from '@/components/ui/Select'
@@ -48,6 +53,33 @@ export default function Assets() {
 
   const { data: filterOptions } = useFilterOptions()
   const reprocessMutation = useReprocessAssets()
+
+  // Bulk action mutations
+  const extractMutation = useMutation({
+    mutationFn: () => apiClient.startExtractJob({ 
+      asset_ids: selectedAssets.length > 0 ? selectedAssets : undefined,
+      reprocess: false 
+    }),
+    onSuccess: () => setSelectedAssets([]),
+  })
+
+  const generateMutation = useMutation({
+    mutationFn: () => apiClient.startGenerateJob({ 
+      asset_ids: selectedAssets.length > 0 ? selectedAssets : undefined,
+      regenerate: false 
+    }),
+    onSuccess: () => setSelectedAssets([]),
+  })
+
+  const classifyMutation = useMutation({
+    mutationFn: () => apiClient.startClassifyJob({ 
+      asset_ids: selectedAssets.length > 0 ? selectedAssets : undefined,
+      reclassify: false 
+    }),
+    onSuccess: () => setSelectedAssets([]),
+  })
+
+  const isAnyMutationLoading = extractMutation.isPending || generateMutation.isPending || classifyMutation.isPending
 
   const handleSelectAsset = (assetId: string) => {
     setSelectedAssets((prev) =>
@@ -96,26 +128,64 @@ export default function Assets() {
             {isTemplate ? 'Preview asset browser with sample data' : 'Browse and manage scraped creative ads'}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           {selectedAssets.length > 0 && (
+            <span className="text-sm text-surface-400">
+              {selectedAssets.length} selected
+            </span>
+          )}
+          
+          {/* Bulk Actions - only show when not in template mode */}
+          {!isTemplate && (
             <>
-              <span className="text-sm text-surface-400">
-                {selectedAssets.length} selected
-              </span>
               <Button
                 variant="secondary"
-                onClick={() => {
-                  reprocessMutation.mutate(selectedAssets)
-                  setSelectedAssets([])
-                }}
-                loading={reprocessMutation.isPending}
+                size="sm"
+                onClick={() => extractMutation.mutate()}
+                loading={extractMutation.isPending}
+                disabled={isAnyMutationLoading}
               >
-                <RefreshCw className="w-4 h-4" />
-                Reprocess
+                <Sparkles className="w-4 h-4" />
+                {selectedAssets.length > 0 ? 'Extract Selected' : 'Extract All'}
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => generateMutation.mutate()}
+                loading={generateMutation.isPending}
+                disabled={isAnyMutationLoading}
+              >
+                <FileText className="w-4 h-4" />
+                {selectedAssets.length > 0 ? 'Generate Selected' : 'Generate All'}
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => classifyMutation.mutate()}
+                loading={classifyMutation.isPending}
+                disabled={isAnyMutationLoading}
+              >
+                <Tag className="w-4 h-4" />
+                {selectedAssets.length > 0 ? 'Classify Selected' : 'Classify All'}
               </Button>
             </>
           )}
-          <Button variant="secondary">
+          
+          {selectedAssets.length > 0 && (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                reprocessMutation.mutate(selectedAssets)
+                setSelectedAssets([])
+              }}
+              loading={reprocessMutation.isPending}
+            >
+              <RefreshCw className="w-4 h-4" />
+              Reprocess
+            </Button>
+          )}
+          <Button variant="secondary" size="sm">
             <Download className="w-4 h-4" />
             Export
           </Button>

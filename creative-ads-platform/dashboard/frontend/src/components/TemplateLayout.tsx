@@ -16,6 +16,7 @@ import {
   X,
   Home,
   FlaskConical,
+  Play,
 } from 'lucide-react'
 import { useState } from 'react'
 import { getHealth } from '@/lib/api'
@@ -23,6 +24,7 @@ import { cn } from '@/lib/utils'
 
 const navigation = [
   { name: 'Dashboard', href: '/template/dashboard', icon: LayoutDashboard },
+  { name: 'Pipeline', href: '/template/pipeline', icon: Play },
   { name: 'Jobs', href: '/template/jobs', icon: ListTodo },
   { name: 'Assets', href: '/template/assets', icon: Image },
   { name: 'Scrapers', href: '/template/scrapers', icon: Radar },

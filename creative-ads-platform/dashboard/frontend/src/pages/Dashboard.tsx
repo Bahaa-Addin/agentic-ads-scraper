@@ -10,7 +10,10 @@ import {
   BarChart3,
   PieChartIcon,
   ListTodo,
+  Play,
+  ArrowRight,
 } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card'
 import { StatCard } from '@/components/ui/StatCard'
 import { StatusBadge } from '@/components/ui/Badge'
@@ -76,6 +79,33 @@ export default function Dashboard() {
             : 'Monitor your creative ads pipeline in real-time'}
         </p>
       </div>
+
+      {/* Quick Actions Card - Live Mode Only */}
+      {!isTemplate && (
+        <Card className="border-brand-500/20 bg-gradient-to-r from-brand-500/5 to-cyan-500/5">
+          <CardContent className="py-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 rounded-xl bg-brand-500/20 flex items-center justify-center">
+                  <Zap className="w-6 h-6 text-brand-500" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-semibold text-white">Pipeline Control Center</h3>
+                  <p className="text-sm text-surface-400">Execute jobs and monitor progress in real-time</p>
+                </div>
+              </div>
+              <Link
+                to="/pipeline"
+                className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-brand-500 text-white font-medium hover:bg-brand-600 transition-colors"
+              >
+                <Play className="w-4 h-4" />
+                Open Pipeline
+                <ArrowRight className="w-4 h-4" />
+              </Link>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Stats Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

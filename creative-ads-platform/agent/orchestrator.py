@@ -6,6 +6,7 @@ The orchestrator is responsible for:
 2. Injecting the correct adapter implementations
 3. Wiring up all components
 4. Starting and stopping the system
+5. Emitting SSE events to the dashboard for real-time monitoring
 
 This module ensures business logic NEVER imports cloud SDKs directly.
 All dependencies are injected through interfaces.
@@ -15,7 +16,10 @@ import asyncio
 import logging
 import os
 from dataclasses import dataclass
-from typing import Optional
+from datetime import datetime
+from typing import Any, Dict, Optional
+
+import httpx
 
 from .config import Config, Mode
 from .interfaces import (
@@ -66,6 +70,8 @@ class Orchestrator:
         self._adapters: Optional[AdapterRegistry] = None
         self._agent: Optional[AgentBrain] = None
         self._initialized = False
+        self._dashboard_url: Optional[str] = None
+        self._http_client: Optional[httpx.AsyncClient] = None
         
     @property
     def adapters(self) -> AdapterRegistry:
@@ -113,10 +119,239 @@ class Orchestrator:
         
         # Log adapter summary
         self._log_adapter_summary()
+        
+        # Initialize dashboard event emitter
+        self._dashboard_url = os.environ.get("DASHBOARD_API_URL", "http://localhost:8000")
+        self._http_client = httpx.AsyncClient(timeout=5.0)
+    
+    # ==========================================================================
+    # SSE Event Emission Methods
+    # ==========================================================================
+    
+    async def emit_event(
+        self,
+        event_type: str,
+        data: Dict[str, Any],
+        job_id: Optional[str] = None
+    ) -> None:
+        """
+        Emit an event to the dashboard SSE stream.
+        
+        Event types:
+        - pipeline_started: Full pipeline began
+        - step_started: Individual step began (scrape, extract, generate, classify)
+        - step_progress: Progress update with percentage
+        - asset_scraped: New asset scraped (includes preview)
+        - screenshot_captured: Screenshot taken (includes URL)
+        - features_extracted: Features computed for asset
+        - prompt_generated: Prompt created for asset
+        - step_completed: Step finished with results
+        - pipeline_completed: Full pipeline finished
+        - error: Error occurred
+        """
+        if not self._http_client or not self._dashboard_url:
+            logger.warning("Dashboard event emitter not initialized")
+            return
+        
+        try:
+            await self._http_client.post(
+                f"{self._dashboard_url}/api/v1/events/emit",
+                params={
+                    "event_type": event_type,
+                    "job_id": job_id,
+                },
+                json=data,
+            )
+            logger.debug(f"Emitted event: {event_type}")
+        except Exception as e:
+            logger.warning(f"Failed to emit event to dashboard: {e}")
+    
+    async def emit_pipeline_started(
+        self,
+        job_id: str,
+        sources: list,
+        query: Optional[str] = None,
+        steps: Optional[list] = None
+    ) -> None:
+        """Emit pipeline started event."""
+        await self.emit_event(
+            "pipeline_started",
+            {
+                "message": f"Pipeline started for {len(sources)} source(s)",
+                "sources": sources,
+                "query": query,
+                "steps": steps or ["scrape", "extract", "generate", "classify"],
+            },
+            job_id=job_id,
+        )
+    
+    async def emit_step_started(
+        self,
+        job_id: str,
+        step_name: str,
+        message: Optional[str] = None
+    ) -> None:
+        """Emit step started event."""
+        await self.emit_event(
+            "step_started",
+            {
+                "step": step_name,
+                "message": message or f"Starting {step_name}...",
+            },
+            job_id=job_id,
+        )
+    
+    async def emit_step_progress(
+        self,
+        job_id: str,
+        step_name: str,
+        progress: float,
+        message: Optional[str] = None
+    ) -> None:
+        """Emit step progress event."""
+        await self.emit_event(
+            "step_progress",
+            {
+                "step": step_name,
+                "progress": progress,
+                "message": message or f"{step_name}: {progress:.0f}%",
+            },
+            job_id=job_id,
+        )
+    
+    async def emit_asset_scraped(
+        self,
+        job_id: str,
+        asset_id: str,
+        title: Optional[str] = None,
+        source: Optional[str] = None,
+        image_url: Optional[str] = None
+    ) -> None:
+        """Emit asset scraped event."""
+        await self.emit_event(
+            "asset_scraped",
+            {
+                "asset_id": asset_id,
+                "title": title,
+                "source": source,
+                "image_url": image_url,
+                "message": f"Scraped: {title or asset_id}",
+            },
+            job_id=job_id,
+        )
+    
+    async def emit_screenshot_captured(
+        self,
+        job_id: str,
+        asset_id: str,
+        screenshot_url: str
+    ) -> None:
+        """Emit screenshot captured event."""
+        await self.emit_event(
+            "screenshot_captured",
+            {
+                "asset_id": asset_id,
+                "screenshot_url": screenshot_url,
+                "message": "Screenshot captured",
+            },
+            job_id=job_id,
+        )
+    
+    async def emit_features_extracted(
+        self,
+        job_id: str,
+        asset_id: str,
+        features: Dict[str, Any]
+    ) -> None:
+        """Emit features extracted event."""
+        await self.emit_event(
+            "features_extracted",
+            {
+                "asset_id": asset_id,
+                "features": features,
+                "message": f"Features extracted for {asset_id}",
+            },
+            job_id=job_id,
+        )
+    
+    async def emit_prompt_generated(
+        self,
+        job_id: str,
+        asset_id: str,
+        prompt: str
+    ) -> None:
+        """Emit prompt generated event."""
+        await self.emit_event(
+            "prompt_generated",
+            {
+                "asset_id": asset_id,
+                "prompt": prompt[:200] + "..." if len(prompt) > 200 else prompt,
+                "message": f"Prompt generated for {asset_id}",
+            },
+            job_id=job_id,
+        )
+    
+    async def emit_step_completed(
+        self,
+        job_id: str,
+        step_name: str,
+        results: Dict[str, Any]
+    ) -> None:
+        """Emit step completed event."""
+        await self.emit_event(
+            "step_completed",
+            {
+                "step": step_name,
+                "results": results,
+                "message": f"{step_name} completed",
+            },
+            job_id=job_id,
+        )
+    
+    async def emit_pipeline_completed(
+        self,
+        job_id: str,
+        duration_seconds: float,
+        assets_count: int,
+        prompts_count: int
+    ) -> None:
+        """Emit pipeline completed event."""
+        await self.emit_event(
+            "pipeline_completed",
+            {
+                "duration_seconds": duration_seconds,
+                "assets_count": assets_count,
+                "prompts_count": prompts_count,
+                "message": f"Pipeline completed in {duration_seconds:.1f}s",
+            },
+            job_id=job_id,
+        )
+    
+    async def emit_error(
+        self,
+        job_id: str,
+        step_name: str,
+        error_message: str
+    ) -> None:
+        """Emit error event."""
+        await self.emit_event(
+            "error",
+            {
+                "step": step_name,
+                "error": error_message,
+                "message": f"Error in {step_name}: {error_message}",
+            },
+            job_id=job_id,
+        )
     
     async def shutdown(self) -> None:
         """Gracefully shutdown all adapters."""
         logger.info("Shutting down Orchestrator...")
+        
+        # Close HTTP client
+        if self._http_client:
+            await self._http_client.aclose()
+            self._http_client = None
         
         if self._adapters:
             # Close adapters in reverse order

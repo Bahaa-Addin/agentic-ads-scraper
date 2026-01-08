@@ -9,6 +9,7 @@ import Scrapers from './pages/Scrapers'
 import Analytics from './pages/Analytics'
 import Logs from './pages/Logs'
 import Settings from './pages/Settings'
+import Pipeline from './pages/Pipeline'
 
 function App() {
   return (
@@ -20,6 +21,7 @@ function App() {
         {/* Real dashboard routes (live data) */}
         <Route element={<Layout />}>
           <Route path="dashboard" element={<Dashboard />} />
+          <Route path="pipeline" element={<Pipeline />} />
           <Route path="jobs" element={<Jobs />} />
           <Route path="assets" element={<Assets />} />
           <Route path="scrapers" element={<Scrapers />} />
@@ -32,6 +34,7 @@ function App() {
         <Route path="/template" element={<TemplateLayout />}>
           <Route index element={<Navigate to="/template/dashboard" replace />} />
           <Route path="dashboard" element={<Dashboard />} />
+          <Route path="pipeline" element={<Pipeline />} />
           <Route path="jobs" element={<Jobs />} />
           <Route path="assets" element={<Assets />} />
           <Route path="scrapers" element={<Scrapers />} />
