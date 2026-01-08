@@ -1,4 +1,3 @@
-import { useQuery } from '@tanstack/react-query'
 import {
   Image,
   Sparkles,
@@ -16,7 +15,8 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card'
 import { StatCard } from '@/components/ui/StatCard'
 import { StatusBadge } from '@/components/ui/Badge'
 import { EmptyState } from '@/components/ui/EmptyState'
-import { getDashboardMetrics, getJobs, getIndustryDistribution, getTimeSeries } from '@/lib/api'
+import { useDashboardMetrics, useRecentJobs, useIndustryDistribution, useTimeSeries } from '@/lib/useDataHooks'
+import { useIsTemplateMode } from '@/lib/useTemplateMode'
 import { formatNumber, formatDuration, formatRelativeTime, INDUSTRY_COLORS, formatIndustryName } from '@/lib/utils'
 import {
   AreaChart,
@@ -33,27 +33,12 @@ import {
 import { format, parseISO } from 'date-fns'
 
 export default function Dashboard() {
-  const { data: metrics, isLoading: metricsLoading, isError: metricsError } = useQuery({
-    queryKey: ['dashboardMetrics'],
-    queryFn: getDashboardMetrics,
-    refetchInterval: 10000,
-  })
-
-  const { data: recentJobs, isLoading: jobsLoading } = useQuery({
-    queryKey: ['recentJobs'],
-    queryFn: () => getJobs({ page_size: 5 }),
-    refetchInterval: 15000,
-  })
-
-  const { data: industryData, isLoading: industryLoading } = useQuery({
-    queryKey: ['industryDistribution'],
-    queryFn: getIndustryDistribution,
-  })
-
-  const { data: throughputData, isLoading: throughputLoading } = useQuery({
-    queryKey: ['throughputTimeSeries'],
-    queryFn: () => getTimeSeries('assets_scraped', 24),
-  })
+  const isTemplate = useIsTemplateMode()
+  
+  const { data: metrics, isLoading: metricsLoading } = useDashboardMetrics()
+  const { data: recentJobs, isLoading: jobsLoading } = useRecentJobs(5)
+  const { data: industryData, isLoading: industryLoading } = useIndustryDistribution()
+  const { data: throughputData, isLoading: throughputLoading } = useTimeSeries('assets_scraped', 24)
 
   // Format time series data for Recharts
   const chartData = throughputData?.data?.map((point) => ({
@@ -69,7 +54,7 @@ export default function Dashboard() {
   })) || []
 
   // Check if we have any real data
-  const hasAssets = metrics?.pipeline?.assets_scraped > 0
+  const hasAssets = (metrics?.pipeline?.assets_scraped ?? 0) > 0
   const hasChartData = chartData.length > 0 && chartData.some(d => d.value > 0)
   const hasPieData = pieData.length > 0 && pieData.some(d => d.value > 0)
   const hasJobs = recentJobs?.jobs && recentJobs.jobs.length > 0
@@ -86,7 +71,9 @@ export default function Dashboard() {
       <div>
         <h1 className="text-2xl font-bold text-white">Dashboard</h1>
         <p className="text-surface-400 mt-1">
-          Monitor your creative ads pipeline in real-time
+          {isTemplate 
+            ? 'Preview dashboard with sample data' 
+            : 'Monitor your creative ads pipeline in real-time'}
         </p>
       </div>
 
@@ -97,8 +84,8 @@ export default function Dashboard() {
           value={metrics?.pipeline?.assets_scraped ?? 0}
           icon={Image}
           color="blue"
-          change={hasAssets ? 12.5 : undefined}
-          changeLabel={hasAssets ? "vs last week" : undefined}
+          change={isTemplate && hasAssets ? 12.5 : undefined}
+          changeLabel={isTemplate && hasAssets ? "vs last week" : undefined}
           loading={metricsLoading}
         />
         <StatCard
@@ -106,8 +93,8 @@ export default function Dashboard() {
           value={metrics?.pipeline?.features_extracted ?? 0}
           icon={Sparkles}
           color="purple"
-          change={hasAssets ? 8.3 : undefined}
-          changeLabel={hasAssets ? "vs last week" : undefined}
+          change={isTemplate && hasAssets ? 8.3 : undefined}
+          changeLabel={isTemplate && hasAssets ? "vs last week" : undefined}
           loading={metricsLoading}
         />
         <StatCard
@@ -115,8 +102,8 @@ export default function Dashboard() {
           value={metrics?.pipeline?.prompts_generated ?? 0}
           icon={MessageSquare}
           color="green"
-          change={hasAssets ? 15.2 : undefined}
-          changeLabel={hasAssets ? "vs last week" : undefined}
+          change={isTemplate && hasAssets ? 15.2 : undefined}
+          changeLabel={isTemplate && hasAssets ? "vs last week" : undefined}
           loading={metricsLoading}
         />
         <StatCard
@@ -124,8 +111,8 @@ export default function Dashboard() {
           value={`${metrics?.system?.error_rate_percent?.toFixed(1) ?? 0}%`}
           icon={AlertCircle}
           color={(metrics?.system?.error_rate_percent ?? 0) > 5 ? 'red' : 'cyan'}
-          change={hasAssets ? -2.1 : undefined}
-          changeLabel={hasAssets ? "vs last week" : undefined}
+          change={isTemplate && hasAssets ? -2.1 : undefined}
+          changeLabel={isTemplate && hasAssets ? "vs last week" : undefined}
           loading={metricsLoading}
         />
       </div>

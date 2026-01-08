@@ -1,19 +1,13 @@
 import { useState } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
-  Play,
-  Pause,
   RefreshCw,
   XCircle,
-  Filter,
   ChevronLeft,
   ChevronRight,
   MoreVertical,
   ListTodo,
-  Radar,
 } from 'lucide-react'
-import { Link } from 'react-router-dom'
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card'
+import { Card, CardContent } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Select } from '@/components/ui/Select'
 import { SearchInput } from '@/components/ui/Input'
@@ -26,10 +20,10 @@ import {
   TableRow,
   TableHeader,
   TableCell,
-  TableEmpty,
   TableLoading,
 } from '@/components/ui/Table'
-import { getJobs, controlJobs, retryAllFailedJobs, getJobStats } from '@/lib/api'
+import { useJobs, useJobStats, useControlJobs, useRetryAllFailedJobs } from '@/lib/useDataHooks'
+import { useIsTemplateMode } from '@/lib/useTemplateMode'
 import { formatRelativeTime, formatSourceName, cn } from '@/lib/utils'
 
 const statusOptions = [
@@ -51,7 +45,7 @@ const typeOptions = [
 ]
 
 export default function Jobs() {
-  const queryClient = useQueryClient()
+  const isTemplate = useIsTemplateMode()
   const [page, setPage] = useState(1)
   const [selectedJobs, setSelectedJobs] = useState<string[]>([])
   const [filters, setFilters] = useState({
@@ -60,41 +54,18 @@ export default function Jobs() {
     source: '',
   })
 
-  const { data: jobs, isLoading } = useQuery({
-    queryKey: ['jobs', page, filters],
-    queryFn: () => getJobs({
-      page,
-      page_size: 15,
-      status: filters.status || undefined,
-      job_type: filters.job_type || undefined,
-      source: filters.source || undefined,
-    }),
-    refetchInterval: 10000,
+  const { data: jobs, isLoading } = useJobs({
+    page,
+    page_size: 15,
+    status: filters.status || undefined,
+    job_type: filters.job_type || undefined,
+    source: filters.source || undefined,
   })
 
-  const { data: stats } = useQuery({
-    queryKey: ['jobStats'],
-    queryFn: getJobStats,
-    refetchInterval: 15000,
-  })
+  const { data: stats } = useJobStats()
 
-  const controlMutation = useMutation({
-    mutationFn: ({ action, jobIds }: { action: string; jobIds: string[] }) =>
-      controlJobs(action, jobIds),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['jobs'] })
-      queryClient.invalidateQueries({ queryKey: ['jobStats'] })
-      setSelectedJobs([])
-    },
-  })
-
-  const retryAllMutation = useMutation({
-    mutationFn: () => retryAllFailedJobs(10),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['jobs'] })
-      queryClient.invalidateQueries({ queryKey: ['jobStats'] })
-    },
-  })
+  const controlMutation = useControlJobs()
+  const retryAllMutation = useRetryAllFailedJobs()
 
   const handleSelectAll = () => {
     if (selectedJobs.length === jobs?.jobs.length) {
@@ -115,6 +86,7 @@ export default function Jobs() {
   const handleControl = (action: string) => {
     if (selectedJobs.length > 0) {
       controlMutation.mutate({ action, jobIds: selectedJobs })
+      setSelectedJobs([])
     }
   }
 
@@ -125,13 +97,13 @@ export default function Jobs() {
         <div>
           <h1 className="text-2xl font-bold text-white">Job Queue</h1>
           <p className="text-surface-400 mt-1">
-            Manage and monitor pipeline jobs
+            {isTemplate ? 'Preview job management with sample data' : 'Manage and monitor pipeline jobs'}
           </p>
         </div>
         <div className="flex items-center gap-2">
           <Button
             variant="secondary"
-            onClick={() => retryAllMutation.mutate()}
+            onClick={() => retryAllMutation.mutate(10)}
             loading={retryAllMutation.isPending}
             disabled={(stats?.failed || 0) === 0}
           >
@@ -330,4 +302,3 @@ export default function Jobs() {
     </div>
   )
 }
-

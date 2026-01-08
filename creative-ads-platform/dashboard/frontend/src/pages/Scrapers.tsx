@@ -1,13 +1,10 @@
 import { useState } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Play,
-  Pause,
   Power,
   RefreshCw,
   AlertCircle,
   CheckCircle,
-  Clock,
   TrendingUp,
   Zap,
   Radar,
@@ -18,51 +15,42 @@ import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
 import { Badge } from '@/components/ui/Badge'
 import { EmptyState } from '@/components/ui/EmptyState'
-import { getScraperStatuses, getScraperMetrics, triggerScraping, triggerAllScrapers } from '@/lib/api'
+import { useScraperStatuses, useScraperMetrics, useTriggerScraping, useTriggerAllScrapers } from '@/lib/useDataHooks'
+import { useIsTemplateMode } from '@/lib/useTemplateMode'
 import { formatRelativeTime, formatSourceName, formatNumber, formatPercent, cn } from '@/lib/utils'
 
 export default function Scrapers() {
-  const queryClient = useQueryClient()
+  const isTemplate = useIsTemplateMode()
   const [selectedSources, setSelectedSources] = useState<string[]>([])
   const [scrapeQuery, setScrapeQuery] = useState('')
   const [maxItems, setMaxItems] = useState(100)
 
-  const { data: statuses, isLoading } = useQuery({
-    queryKey: ['scraperStatuses'],
-    queryFn: getScraperStatuses,
-    refetchInterval: 10000,
-  })
+  const { data: statuses, isLoading } = useScraperStatuses()
+  // const { data: metrics } = useScraperMetrics()
+  useScraperMetrics() // Keep hook active for future use
 
-  const { data: metrics } = useQuery({
-    queryKey: ['scraperMetrics'],
-    queryFn: getScraperMetrics,
-    refetchInterval: 15000,
-  })
+  const triggerMutation = useTriggerScraping()
+  const triggerAllMutation = useTriggerAllScrapers()
 
-  const triggerMutation = useMutation({
-    mutationFn: () => triggerScraping(selectedSources, {
+  const handleTriggerScraping = () => {
+    triggerMutation.mutate({
+      sources: selectedSources,
+      options: {
+        query: scrapeQuery || undefined,
+        max_items_per_source: maxItems,
+      },
+    })
+    setSelectedSources([])
+    setScrapeQuery('')
+  }
+
+  const handleTriggerAll = () => {
+    triggerAllMutation.mutate({
       query: scrapeQuery || undefined,
       max_items_per_source: maxItems,
-    }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['scraperStatuses'] })
-      queryClient.invalidateQueries({ queryKey: ['jobs'] })
-      setSelectedSources([])
-      setScrapeQuery('')
-    },
-  })
-
-  const triggerAllMutation = useMutation({
-    mutationFn: () => triggerAllScrapers({
-      query: scrapeQuery || undefined,
-      max_items_per_source: maxItems,
-    }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['scraperStatuses'] })
-      queryClient.invalidateQueries({ queryKey: ['jobs'] })
-      setScrapeQuery('')
-    },
-  })
+    })
+    setScrapeQuery('')
+  }
 
   const toggleSource = (source: string) => {
     setSelectedSources((prev) =>
@@ -85,13 +73,13 @@ export default function Scrapers() {
         <div>
           <h1 className="text-2xl font-bold text-white">Scrapers</h1>
           <p className="text-surface-400 mt-1">
-            Monitor and control web scrapers
+            {isTemplate ? 'Preview scraper controls with sample data' : 'Monitor and control web scrapers'}
           </p>
         </div>
         <div className="flex items-center gap-2">
           <Button
             variant="secondary"
-            onClick={() => triggerAllMutation.mutate()}
+            onClick={handleTriggerAll}
             loading={triggerAllMutation.isPending}
           >
             <Zap className="w-4 h-4" />
@@ -210,7 +198,7 @@ export default function Scrapers() {
             {/* Trigger Button */}
             <div className="flex justify-end pt-4">
               <Button
-                onClick={() => triggerMutation.mutate()}
+                onClick={handleTriggerScraping}
                 loading={triggerMutation.isPending}
                 disabled={selectedSources.length === 0}
               >
@@ -344,4 +332,3 @@ function ScraperCard({ status }: { status: { source: string; enabled: boolean; r
     </Card>
   )
 }
-

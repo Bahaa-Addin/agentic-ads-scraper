@@ -1,8 +1,5 @@
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
 import {
-  Search,
-  Filter,
   RefreshCw,
   AlertCircle,
   Info,
@@ -10,15 +7,16 @@ import {
   Bug,
   ChevronLeft,
   ChevronRight,
-  ExternalLink,
   FileText,
 } from 'lucide-react'
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card'
+import { Card, CardContent } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Select } from '@/components/ui/Select'
 import { SearchInput } from '@/components/ui/Input'
 import { EmptyState } from '@/components/ui/EmptyState'
-import { getLogs, getErrorLogs, getLogStats, type LogEntry } from '@/lib/api'
+import { useLogs, useLogStats } from '@/lib/useDataHooks'
+import { useIsTemplateMode } from '@/lib/useTemplateMode'
+import { type LogEntry } from '@/lib/api'
 import { formatDate, getLogLevelColor, getLogLevelBg, cn } from '@/lib/utils'
 
 const levelOptions = [
@@ -45,6 +43,7 @@ const LevelIcon = ({ level }: { level: string }) => {
 }
 
 export default function Logs() {
+  const isTemplate = useIsTemplateMode()
   const [page, setPage] = useState(1)
   const [showErrors, setShowErrors] = useState(false)
   const [filters, setFilters] = useState({
@@ -54,26 +53,19 @@ export default function Logs() {
     job_id: '',
   })
 
-  const { data: logs, isLoading, refetch } = useQuery({
-    queryKey: ['logs', page, filters, showErrors],
-    queryFn: () =>
-      showErrors
-        ? getErrorLogs({ page, page_size: 50 })
-        : getLogs({
-            page,
-            page_size: 50,
-            level: filters.level || undefined,
-            source: filters.source || undefined,
-            search: filters.search || undefined,
-            job_id: filters.job_id || undefined,
-          }),
-    refetchInterval: 10000,
-  })
+  const { data: logs, isLoading, refetch } = useLogs(
+    {
+      page,
+      page_size: 50,
+      level: filters.level || undefined,
+      source: filters.source || undefined,
+      search: filters.search || undefined,
+      job_id: filters.job_id || undefined,
+    },
+    showErrors
+  )
 
-  const { data: stats } = useQuery({
-    queryKey: ['logStats'],
-    queryFn: getLogStats,
-  })
+  const { data: stats } = useLogStats()
 
   return (
     <div className="space-y-6">
@@ -82,7 +74,7 @@ export default function Logs() {
         <div>
           <h1 className="text-2xl font-bold text-white">Logs</h1>
           <p className="text-surface-400 mt-1">
-            Search and filter application logs
+            {isTemplate ? 'Preview log viewer with sample data' : 'Search and filter application logs'}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -291,4 +283,3 @@ function LogItem({ log }: { log: LogEntry }) {
     </div>
   )
 }
-

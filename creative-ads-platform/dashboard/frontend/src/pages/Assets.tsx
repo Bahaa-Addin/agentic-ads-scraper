@@ -1,9 +1,7 @@
 import { useState } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Grid,
   List,
-  Filter,
   Download,
   RefreshCw,
   ChevronLeft,
@@ -12,20 +10,20 @@ import {
   Copy,
   Check,
   Image as ImageIcon,
-  Radar,
 } from 'lucide-react'
-import { Link } from 'react-router-dom'
 import { Card, CardContent } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Select } from '@/components/ui/Select'
 import { SearchInput } from '@/components/ui/Input'
-import { Badge, StatusBadge } from '@/components/ui/Badge'
+import { Badge } from '@/components/ui/Badge'
 import { EmptyState } from '@/components/ui/EmptyState'
-import { getAssets, getFilterOptions, reprocessAssets, type Asset } from '@/lib/api'
-import { formatRelativeTime, formatSourceName, formatIndustryName, cn, truncate } from '@/lib/utils'
+import { useAssets, useFilterOptions, useReprocessAssets } from '@/lib/useDataHooks'
+import { useIsTemplateMode } from '@/lib/useTemplateMode'
+import { type Asset } from '@/lib/api'
+import { formatRelativeTime, formatSourceName, formatIndustryName, cn } from '@/lib/utils'
 
 export default function Assets() {
-  const queryClient = useQueryClient()
+  const isTemplate = useIsTemplateMode()
   const [page, setPage] = useState(1)
   const [view, setView] = useState<'grid' | 'list'>('grid')
   const [selectedAssets, setSelectedAssets] = useState<string[]>([])
@@ -38,31 +36,18 @@ export default function Assets() {
     search: '',
   })
 
-  const { data: assets, isLoading } = useQuery({
-    queryKey: ['assets', page, filters],
-    queryFn: () => getAssets({
-      page,
-      page_size: view === 'grid' ? 12 : 20,
-      industry: filters.industry || undefined,
-      source: filters.source || undefined,
-      cta_type: filters.cta_type || undefined,
-      has_prompt: filters.has_prompt === 'true' ? true : filters.has_prompt === 'false' ? false : undefined,
-      search: filters.search || undefined,
-    }),
+  const { data: assets, isLoading } = useAssets({
+    page,
+    page_size: view === 'grid' ? 12 : 20,
+    industry: filters.industry || undefined,
+    source: filters.source || undefined,
+    cta_type: filters.cta_type || undefined,
+    has_prompt: filters.has_prompt === 'true' ? true : filters.has_prompt === 'false' ? false : undefined,
+    search: filters.search || undefined,
   })
 
-  const { data: filterOptions } = useQuery({
-    queryKey: ['filterOptions'],
-    queryFn: getFilterOptions,
-  })
-
-  const reprocessMutation = useMutation({
-    mutationFn: (assetIds: string[]) => reprocessAssets(assetIds, ['extract_features', 'generate_prompt']),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['assets'] })
-      setSelectedAssets([])
-    },
-  })
+  const { data: filterOptions } = useFilterOptions()
+  const reprocessMutation = useReprocessAssets()
 
   const handleSelectAsset = (assetId: string) => {
     setSelectedAssets((prev) =>
@@ -99,6 +84,8 @@ export default function Assets() {
     { value: 'false', label: 'Without Prompt' },
   ]
 
+  const baseRoute = isTemplate ? '/template' : ''
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -106,7 +93,7 @@ export default function Assets() {
         <div>
           <h1 className="text-2xl font-bold text-white">Creative Assets</h1>
           <p className="text-surface-400 mt-1">
-            Browse and manage scraped creative ads
+            {isTemplate ? 'Preview asset browser with sample data' : 'Browse and manage scraped creative ads'}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -117,7 +104,10 @@ export default function Assets() {
               </span>
               <Button
                 variant="secondary"
-                onClick={() => reprocessMutation.mutate(selectedAssets)}
+                onClick={() => {
+                  reprocessMutation.mutate(selectedAssets)
+                  setSelectedAssets([])
+                }}
                 loading={reprocessMutation.isPending}
               >
                 <RefreshCw className="w-4 h-4" />
@@ -213,7 +203,7 @@ export default function Assets() {
                 !filters.industry && !filters.source && !filters.search
                   ? {
                       label: 'Go to Scrapers',
-                      onClick: () => window.location.href = '/scrapers',
+                      onClick: () => window.location.href = `${baseRoute}/scrapers`,
                     }
                   : undefined
               }
@@ -495,4 +485,3 @@ function AssetListItem({
     </div>
   )
 }
-

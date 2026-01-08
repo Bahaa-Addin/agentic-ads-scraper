@@ -6,7 +6,6 @@ import {
   Database,
   Cloud,
   Bell,
-  Shield,
   Palette,
   CheckCircle,
   XCircle,
@@ -194,7 +193,7 @@ export default function Settings() {
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
-                  {health?.services?.map((service) => (
+                  {health?.services?.map((service: { name: string; healthy: boolean; message?: string; latency_ms?: number }) => (
                     <div
                       key={service.name}
                       className="flex items-center justify-between p-4 rounded-lg bg-surface-800/50"
