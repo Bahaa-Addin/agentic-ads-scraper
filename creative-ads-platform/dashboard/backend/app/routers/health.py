@@ -178,7 +178,7 @@ async def _check_agent_service(settings: Settings) -> ServiceHealth:
     
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
-            response = await client.get(f"{settings.agent_service_url}/health")
+            response = await client.get(f"{settings.agent_api_url}/health")
             if response.status_code != 200:
                 healthy = False
                 message = f"HTTP {response.status_code}"
@@ -213,7 +213,7 @@ async def _check_scraper_service(settings: Settings) -> ServiceHealth:
     
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
-            response = await client.get(f"{settings.scraper_service_url}/health")
+            response = await client.get(f"{settings.scraper_api_url}/health")
             if response.status_code != 200:
                 healthy = False
                 message = f"HTTP {response.status_code}"

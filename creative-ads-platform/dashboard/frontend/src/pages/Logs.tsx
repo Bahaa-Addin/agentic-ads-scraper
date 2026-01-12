@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   RefreshCw,
   AlertCircle,
@@ -44,6 +45,7 @@ const LevelIcon = ({ level }: { level: string }) => {
 
 export default function Logs() {
   const isTemplate = useIsTemplateMode()
+  const [searchParams] = useSearchParams()
   const [page, setPage] = useState(1)
   const [showErrors, setShowErrors] = useState(false)
   const [filters, setFilters] = useState({
@@ -52,6 +54,14 @@ export default function Logs() {
     search: '',
     job_id: '',
   })
+
+  // Read job_id from URL parameters on mount
+  useEffect(() => {
+    const jobIdParam = searchParams.get('job_id')
+    if (jobIdParam) {
+      setFilters((prev) => ({ ...prev, job_id: jobIdParam }))
+    }
+  }, [searchParams])
 
   const { data: logs, isLoading, refetch } = useLogs(
     {

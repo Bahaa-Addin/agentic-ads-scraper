@@ -62,8 +62,8 @@ interface UseScraperStreamReturn {
   reconnect: () => void
 }
 
-// Default to agent API port
-const AGENT_WS_URL = import.meta.env.VITE_AGENT_WS_URL || 'ws://localhost:8080'
+// Node.js scraper WebSocket URL for live streaming
+const SCRAPER_WS_URL = import.meta.env.VITE_SCRAPER_WS_URL || 'ws://localhost:3001'
 
 export function useScraperStream(
   sessionId: string | null,
@@ -87,6 +87,7 @@ export function useScraperStream(
   const reconnectAttemptsRef = useRef(0)
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const pingIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const streamEndedRef = useRef(false) // Track if stream explicitly ended
 
   const cleanup = useCallback(() => {
     if (reconnectTimeoutRef.current) {
@@ -110,11 +111,13 @@ export function useScraperStream(
     }
 
     cleanup()
+    streamEndedRef.current = false // Reset on new connection
     setStatus('connecting')
     setError(null)
 
     try {
-      const ws = new WebSocket(`${AGENT_WS_URL}/ws/scraper/${sessionId}`)
+      // Connect to Node.js scraper WebSocket with sessionId as query param
+      const ws = new WebSocket(`${SCRAPER_WS_URL}/ws/stream?sessionId=${sessionId}`)
       wsRef.current = ws
 
       ws.onopen = () => {
@@ -151,6 +154,7 @@ export function useScraperStream(
               break
               
             case 'stream_ended':
+              streamEndedRef.current = true // Mark stream as explicitly ended
               setStatus('ended')
               setSessionInfo(prev => prev ? { ...prev, is_active: false } : null)
               break
@@ -175,6 +179,12 @@ export function useScraperStream(
 
       ws.onclose = (event) => {
         cleanup()
+        
+        // Don't reconnect if stream explicitly ended
+        if (streamEndedRef.current) {
+          setStatus('ended')
+          return
+        }
         
         if (event.code === 1000 || event.code === 1001) {
           // Normal closure

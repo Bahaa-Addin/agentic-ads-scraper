@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import {
   RefreshCw,
   XCircle,
@@ -8,6 +8,10 @@ import {
   ListTodo,
   Film,
   X,
+  FileText,
+  Play,
+  Trash2,
+  Copy,
 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
@@ -28,6 +32,7 @@ import {
 import { useJobs, useJobStats, useControlJobs, useRetryAllFailedJobs } from '@/lib/useDataHooks'
 import { useJobsWithScreenshots } from '@/hooks/useJobScreenshots'
 import { useIsTemplateMode } from '@/lib/useTemplateMode'
+import { useNavigate } from 'react-router-dom'
 import { formatRelativeTime, formatSourceName, cn } from '@/lib/utils'
 
 const statusOptions = [
@@ -50,14 +55,28 @@ const typeOptions = [
 
 export default function Jobs() {
   const isTemplate = useIsTemplateMode()
+  const navigate = useNavigate()
   const [page, setPage] = useState(1)
   const [selectedJobs, setSelectedJobs] = useState<string[]>([])
   const [replayJobId, setReplayJobId] = useState<string | null>(null)
+  const [actionMenuJobId, setActionMenuJobId] = useState<string | null>(null)
+  const actionMenuRef = useRef<HTMLDivElement>(null)
   const [filters, setFilters] = useState({
     status: '',
     job_type: '',
     source: '',
   })
+
+  // Close action menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (actionMenuRef.current && !actionMenuRef.current.contains(event.target as Node)) {
+        setActionMenuJobId(null)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
 
   // Fetch jobs that have screenshots for replay
   const { data: jobsWithScreenshots } = useJobsWithScreenshots()
@@ -97,6 +116,28 @@ export default function Jobs() {
     if (selectedJobs.length > 0) {
       controlMutation.mutate({ action, jobIds: selectedJobs })
       setSelectedJobs([])
+    }
+  }
+
+  const handleJobAction = (action: string, jobId: string) => {
+    setActionMenuJobId(null)
+    switch (action) {
+      case 'retry':
+        controlMutation.mutate({ action: 'retry', jobIds: [jobId] })
+        break
+      case 'cancel':
+        controlMutation.mutate({ action: 'cancel', jobIds: [jobId] })
+        break
+      case 'replay':
+        setReplayJobId(jobId)
+        break
+      case 'logs':
+        // Navigate to logs filtered by this job
+        navigate(`/logs?job_id=${jobId}`)
+        break
+      case 'copy':
+        navigator.clipboard.writeText(jobId)
+        break
     }
   }
 
@@ -271,7 +312,7 @@ export default function Jobs() {
                     {formatRelativeTime(job.created_at)}
                   </TableCell>
                   <TableCell>
-                    <div className="flex items-center gap-1">
+                    <div className="relative flex items-center gap-1">
                       {hasScreenshots(job.id) && (
                         <button
                           onClick={() => setReplayJobId(job.id)}
@@ -281,9 +322,62 @@ export default function Jobs() {
                           <Film className="w-4 h-4" />
                         </button>
                       )}
-                      <button className="p-1 text-surface-400 hover:text-white transition-colors">
+                      <button 
+                        onClick={() => setActionMenuJobId(actionMenuJobId === job.id ? null : job.id)}
+                        className="p-1 text-surface-400 hover:text-white transition-colors"
+                      >
                         <MoreVertical className="w-4 h-4" />
                       </button>
+                      
+                      {/* Action Dropdown Menu */}
+                      {actionMenuJobId === job.id && (
+                        <div 
+                          ref={actionMenuRef}
+                          className="absolute right-0 top-8 z-50 w-40 py-1 bg-surface-800 border border-surface-700 rounded-lg shadow-xl"
+                        >
+                          <button
+                            onClick={() => handleJobAction('copy', job.id)}
+                            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-surface-300 hover:bg-surface-700 hover:text-white"
+                          >
+                            <Copy className="w-4 h-4" />
+                            Copy ID
+                          </button>
+                          <button
+                            onClick={() => handleJobAction('logs', job.id)}
+                            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-surface-300 hover:bg-surface-700 hover:text-white"
+                          >
+                            <FileText className="w-4 h-4" />
+                            View Logs
+                          </button>
+                          {hasScreenshots(job.id) && (
+                            <button
+                              onClick={() => handleJobAction('replay', job.id)}
+                              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-surface-300 hover:bg-surface-700 hover:text-white"
+                            >
+                              <Film className="w-4 h-4" />
+                              View Replay
+                            </button>
+                          )}
+                          {job.status === 'failed' && (
+                            <button
+                              onClick={() => handleJobAction('retry', job.id)}
+                              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-surface-300 hover:bg-surface-700 hover:text-white"
+                            >
+                              <RefreshCw className="w-4 h-4" />
+                              Retry Job
+                            </button>
+                          )}
+                          {(job.status === 'pending' || job.status === 'in_progress') && (
+                            <button
+                              onClick={() => handleJobAction('cancel', job.id)}
+                              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-400 hover:bg-surface-700 hover:text-red-300"
+                            >
+                              <XCircle className="w-4 h-4" />
+                              Cancel Job
+                            </button>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </TableCell>
                 </TableRow>

@@ -53,20 +53,29 @@ class FirestoreService:
             data_dir = backend_dir / data_dir
         return Path(data_dir) / filename
     
-    def _load_local_data(self):
-        """Load data from local JSON files."""
+    def _load_local_data(self, force: bool = False):
+        """
+        Load data from local JSON files.
+        
+        In local mode, always reads fresh from disk to pick up changes
+        from the Agent service.
+        """
         # Load jobs
         jobs_path = self._get_data_path("db/jobs.json")
         if jobs_path.exists():
             try:
                 with open(jobs_path, "r") as f:
                     self._local_data["jobs"] = json.load(f)
-                logger.info(f"Loaded {len(self._local_data['jobs'])} jobs from {jobs_path}")
+                if force:
+                    logger.debug(f"Refreshed {len(self._local_data['jobs'])} jobs from {jobs_path}")
+                else:
+                    logger.info(f"Loaded {len(self._local_data['jobs'])} jobs from {jobs_path}")
             except (json.JSONDecodeError, IOError) as e:
                 logger.warning(f"Failed to load jobs from {jobs_path}: {e}")
                 self._local_data["jobs"] = []
         else:
-            logger.info(f"Jobs file not found at {jobs_path}, starting with empty data")
+            if not force:
+                logger.info(f"Jobs file not found at {jobs_path}, starting with empty data")
             self._local_data["jobs"] = []
         
         # Load assets
@@ -75,13 +84,22 @@ class FirestoreService:
             try:
                 with open(assets_path, "r") as f:
                     self._local_data["assets"] = json.load(f)
-                logger.info(f"Loaded {len(self._local_data['assets'])} assets from {assets_path}")
+                if force:
+                    logger.debug(f"Refreshed {len(self._local_data['assets'])} assets from {assets_path}")
+                else:
+                    logger.info(f"Loaded {len(self._local_data['assets'])} assets from {assets_path}")
             except (json.JSONDecodeError, IOError) as e:
                 logger.warning(f"Failed to load assets from {assets_path}: {e}")
                 self._local_data["assets"] = []
         else:
-            logger.info(f"Assets file not found at {assets_path}, starting with empty data")
+            if not force:
+                logger.info(f"Assets file not found at {assets_path}, starting with empty data")
             self._local_data["assets"] = []
+    
+    def _refresh_data(self):
+        """Refresh data from disk (for local mode)."""
+        if self.settings.mode == "local":
+            self._load_local_data(force=True)
     
     def _save_local_data(self, collection: str):
         """Save data to local JSON file."""
@@ -166,7 +184,8 @@ class FirestoreService:
             
             return jobs, total
         
-        # Local mode - read from JSON
+        # Local mode - read from JSON (refresh to pick up Agent updates)
+        self._refresh_data()
         jobs = self._local_data["jobs"].copy()
         
         if status:
@@ -194,7 +213,8 @@ class FirestoreService:
                 return Job(id=doc.id, **doc.to_dict())
             return None
         
-        # Local mode
+        # Local mode - refresh to pick up Agent updates
+        self._refresh_data()
         for job in self._local_data["jobs"]:
             if job.get("id") == job_id:
                 return Job(**job)
@@ -245,6 +265,8 @@ class FirestoreService:
                 status = doc.to_dict().get("status", "pending")
                 counts[status] = counts.get(status, 0) + 1
         else:
+            # Refresh data to pick up Agent updates
+            self._refresh_data()
             for job in self._local_data["jobs"]:
                 status = job.get("status", "pending")
                 counts[status] = counts.get(status, 0) + 1
@@ -290,7 +312,8 @@ class FirestoreService:
             
             return assets, total
         
-        # Local mode
+        # Local mode - refresh to pick up Agent updates
+        self._refresh_data()
         assets = self._local_data["assets"].copy()
         
         if filters:

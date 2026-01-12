@@ -257,26 +257,45 @@ class MetricsService:
         interval_minutes: int = 60
     ) -> TimeSeriesData:
         """Get time series data for a metric from local file."""
-        time_series = self._load_json_file("metrics/time_series.json", [])
+        time_series = self._load_json_file("metrics/time_series.json", {})
         
         now = datetime.utcnow()
         cutoff = now - timedelta(hours=hours)
         
         # Filter data points for this metric within the time range
         data_points = []
-        for entry in time_series:
-            if entry.get("metric") != metric_name:
-                continue
-            
-            try:
-                timestamp = datetime.fromisoformat(entry["timestamp"])
-                if timestamp >= cutoff:
-                    data_points.append(TimeSeriesDataPoint(
-                        timestamp=timestamp,
-                        value=entry.get("value", 0)
-                    ))
-            except (ValueError, KeyError):
-                continue
+        
+        # Handle both formats:
+        # 1. Dict format: {"metric_name": [{"timestamp": "...", "value": 0}]}
+        # 2. Array format: [{"metric": "metric_name", "timestamp": "...", "value": 0}]
+        if isinstance(time_series, dict):
+            # New dict format from Agent's DataService
+            metric_data = time_series.get(metric_name, [])
+            for entry in metric_data:
+                try:
+                    timestamp = datetime.fromisoformat(entry["timestamp"])
+                    if timestamp >= cutoff:
+                        data_points.append(TimeSeriesDataPoint(
+                            timestamp=timestamp,
+                            value=entry.get("value", 0)
+                        ))
+                except (ValueError, KeyError):
+                    continue
+        else:
+            # Legacy array format
+            for entry in time_series:
+                if entry.get("metric") != metric_name:
+                    continue
+                
+                try:
+                    timestamp = datetime.fromisoformat(entry["timestamp"])
+                    if timestamp >= cutoff:
+                        data_points.append(TimeSeriesDataPoint(
+                            timestamp=timestamp,
+                            value=entry.get("value", 0)
+                        ))
+                except (ValueError, KeyError):
+                    continue
         
         # Sort by timestamp
         data_points.sort(key=lambda x: x.timestamp)

@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     
     # Local-first mode settings
     mode: str = Field(default="local", alias="MODE")  # "local" or "cloud"
-    data_dir: str = Field(default="./data", alias="DATA_DIR")  # Path to local data files
+    data_dir: str = Field(default="../../data", alias="DATA_DIR")  # Path to local data files (relative to backend dir)
     
     # Server
     host: str = "0.0.0.0"
@@ -59,13 +59,15 @@ class Settings(BaseSettings):
     bigquery_enabled: bool = Field(default=False, alias="BIGQUERY_ENABLED")
     
     # Agent Service
-    agent_service_url: str = Field(
-        default="http://localhost:8080",
-        alias="AGENT_SERVICE_URL"
-    )
-    scraper_service_url: str = Field(
+    agent_api_url: str = Field(
         default="http://localhost:8081",
-        alias="SCRAPER_SERVICE_URL"
+        alias="AGENT_API_URL"
+    )
+    
+    # Node.js Scraper Service (with WebSocket streaming)
+    scraper_api_url: str = Field(
+        default="http://localhost:3001",
+        alias="SCRAPER_API_URL"
     )
     
     # Vertex AI
@@ -95,6 +97,7 @@ class Settings(BaseSettings):
         env_file = ".env"
         case_sensitive = False
         populate_by_name = True
+        extra = "ignore"  # Ignore unknown env vars (e.g., old AGENT_SERVICE_URL)
     
     def __init__(self, **kwargs):
         super().__init__(**kwargs)

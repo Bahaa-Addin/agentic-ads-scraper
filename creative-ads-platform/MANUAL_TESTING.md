@@ -15,9 +15,11 @@
 7. [Testing the Orchestrator](#7-testing-the-orchestrator)
 8. [Testing the Agent Brain](#8-testing-the-agent-brain)
 9. [Testing the Agent API](#9-testing-the-agent-api)
-10. [Testing the Dashboard Backend](#10-testing-the-dashboard-backend)
-11. [Testing the Dashboard Frontend](#11-testing-the-dashboard-frontend)
-12. [End-to-End Integration Test](#12-end-to-end-integration-test)
+10. [Testing the Node.js Scraper with Live Streaming](#10-testing-the-nodejs-scraper-with-live-streaming)
+11. [Testing the Dashboard Backend](#11-testing-the-dashboard-backend)
+12. [Testing the Dashboard Frontend](#12-testing-the-dashboard-frontend)
+13. [Testing Live Scraper Streaming](#13-testing-live-scraper-streaming)
+14. [End-to-End Integration Test](#14-end-to-end-integration-test)
 
 ---
 
@@ -560,7 +562,7 @@ EOF
 
 ```bash
 cd /Users/monterey/Workspace/Projs/Tasmem/tasmem-scraping/creative-ads-platform
-MODE=local ./venv/bin/uvicorn agent.api:app --host 0.0.0.0 --port 8081
+MODE=local ./venv/bin/uvicorn agent.api:app --host 0.0.0.0 --port 8080
 ```
 
 Wait for: `INFO: Application startup complete.`
@@ -577,40 +579,40 @@ echo "AGENT API ENDPOINT TESTS"
 echo "="
 
 echo -e "\n--- 1. Health Check ---"
-curl -s http://localhost:8081/health | python3 -m json.tool
+curl -s http://localhost:8080/health | python3 -m json.tool
 
 echo -e "\n--- 2. Readiness Check ---"
-curl -s http://localhost:8081/ready | python3 -m json.tool
+curl -s http://localhost:8080/ready | python3 -m json.tool
 
 echo -e "\n--- 3. List Sources ---"
-curl -s http://localhost:8081/sources | python3 -m json.tool
+curl -s http://localhost:8080/sources | python3 -m json.tool
 
 echo -e "\n--- 4. List Industries ---"
-curl -s http://localhost:8081/industries | python3 -m json.tool
+curl -s http://localhost:8080/industries | python3 -m json.tool
 
 echo -e "\n--- 5. Create Scraping Job ---"
-curl -s -X POST http://localhost:8081/scrape \
+curl -s -X POST http://localhost:8080/scrape \
   -H "Content-Type: application/json" \
   -d '{"source": "meta_ad_library", "query": "technology", "max_items": 10}' | python3 -m json.tool
 
 echo -e "\n--- 6. Queue Size ---"
-curl -s http://localhost:8081/queue/size | python3 -m json.tool
+curl -s http://localhost:8080/queue/size | python3 -m json.tool
 
 echo -e "\n--- 7. Queue Metrics ---"
-curl -s http://localhost:8081/queue/metrics | python3 -m json.tool
+curl -s http://localhost:8080/queue/metrics | python3 -m json.tool
 
 echo -e "\n--- 8. Pipeline Status ---"
-curl -s http://localhost:8081/status | python3 -m json.tool
+curl -s http://localhost:8080/status | python3 -m json.tool
 
 echo -e "\n--- 9. Pipeline Metrics ---"
-curl -s http://localhost:8081/metrics | python3 -m json.tool
+curl -s http://localhost:8080/metrics | python3 -m json.tool
 
 echo -e "\n🎉 ALL API ENDPOINT TESTS COMPLETE!"
 ```
 
 ### 9.3 Visit Swagger Documentation
 
-Open in browser: **http://localhost:8081/docs**
+Open in browser: **http://localhost:8080/docs**
 
 You should see:
 - Interactive API documentation
@@ -619,11 +621,91 @@ You should see:
 
 ---
 
-## 10. Testing the Dashboard Backend
+## 10. Testing the Node.js Scraper with Live Streaming
 
-### 10.1 Start the Dashboard Backend
+### 10.1 Start the Scraper Server
 
-**In Terminal 3:**
+**Open a new terminal (Terminal 3):**
+
+```bash
+cd /Users/monterey/Workspace/Projs/Tasmem/tasmem-scraping/creative-ads-platform/scrapers
+
+# Use Node.js 20+ (required for Playwright and sharp)
+source ~/.nvm/nvm.sh && nvm use 20
+
+# Install dependencies (first time only)
+npm install
+
+# Start the server
+node server.js
+```
+
+**Expected output:**
+```
+info: StreamManager initialized
+info: WebSocket server initialized on /ws/stream
+info: Scraper server listening on 0.0.0.0:3001
+info: WebSocket streaming available at ws://0.0.0.0:3001/ws/stream
+info: Screenshots directory: ./data/screenshots
+```
+
+### 10.2 Test Scraper HTTP Endpoints
+
+```bash
+echo "="
+echo "SCRAPER API ENDPOINT TESTS"
+echo "="
+
+echo -e "\n--- 1. Health Check ---"
+curl -s http://localhost:3001/health | python3 -m json.tool
+
+echo -e "\n--- 2. List Sources ---"
+curl -s http://localhost:3001/sources | python3 -m json.tool
+
+echo -e "\n--- 3. Active Streaming Sessions ---"
+curl -s http://localhost:3001/sessions/active | python3 -m json.tool
+
+echo -e "\n--- 4. Sessions with Screenshots ---"
+curl -s http://localhost:3001/sessions/with-screenshots | python3 -m json.tool
+
+echo -e "\n--- 5. Direct Scrape Request (with streaming) ---"
+curl -s -X POST http://localhost:3001/scrape \
+  -H "Content-Type: application/json" \
+  -d '{
+    "source": "wikimedia_commons",
+    "query": "advertisement",
+    "maxItems": 5,
+    "streaming": true,
+    "headless": true
+  }' | python3 -m json.tool
+
+echo -e "\n🎉 ALL SCRAPER ENDPOINT TESTS COMPLETE!"
+```
+
+### 10.3 Test WebSocket Streaming
+
+```bash
+# Using websocat (install with: brew install websocat)
+# Or use wscat: npm install -g wscat
+
+# Connect to stream with a session ID
+wscat -c "ws://localhost:3001/ws/stream?sessionId=test-session-1"
+```
+
+When a scrape job runs with that session ID, you'll receive JSON messages:
+```json
+{"type": "session_info", "session": {...}}
+{"type": "frame", "data": "<base64-jpeg>", "timestamp": "..."}
+{"type": "stream_ended", "session": {...}}
+```
+
+---
+
+## 11. Testing the Dashboard Backend
+
+### 11.1 Start the Dashboard Backend
+
+**In Terminal 4:**
 
 ```bash
 cd /Users/monterey/Workspace/Projs/Tasmem/tasmem-scraping/creative-ads-platform/dashboard/backend
@@ -631,9 +713,7 @@ source venv/bin/activate
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-### 10.2 Test Dashboard Backend Endpoints
-
-**In Terminal 2:**
+### 11.2 Test Dashboard Backend Endpoints
 
 ```bash
 echo "="
@@ -646,50 +726,112 @@ curl -s http://localhost:8000/ | python3 -m json.tool
 echo -e "\n--- 2. Health Check ---"
 curl -s http://localhost:8000/health | python3 -m json.tool
 
-echo -e "\n--- 3. Prometheus Metrics ---"
+echo -e "\n--- 3. Active Scrapers (proxied from scraper server) ---"
+curl -s http://localhost:8000/api/v1/scrapers/active | python3 -m json.tool
+
+echo -e "\n--- 4. Sessions with Screenshots ---"
+curl -s http://localhost:8000/api/v1/scrapers/sessions/with-screenshots | python3 -m json.tool
+
+echo -e "\n--- 5. Prometheus Metrics ---"
 curl -s http://localhost:8000/metrics | head -20
 
 echo -e "\n🎉 DASHBOARD BACKEND TESTS COMPLETE!"
 ```
 
-### 10.3 Visit Dashboard Backend Swagger
+### 11.3 Visit Dashboard Backend Swagger
 
 Open in browser: **http://localhost:8000/docs**
 
 ---
 
-## 11. Testing the Dashboard Frontend
+## 12. Testing the Dashboard Frontend
 
-### 11.1 Start the Frontend
+### 12.1 Start the Frontend
 
-**In Terminal 4:**
+**In Terminal 5:**
 
 ```bash
 cd /Users/monterey/Workspace/Projs/Tasmem/tasmem-scraping/creative-ads-platform/dashboard/frontend
 npm run dev
 ```
 
-### 11.2 Access the Dashboard
+### 12.2 Access the Dashboard
 
 Open in browser: **http://localhost:5173**
 
-### 11.3 Manual UI Tests
+### 12.3 Manual UI Tests
 
 | Test | Action | Expected Result |
 |------|--------|-----------------|
-| Page Load | Open http://localhost:5173 | Dashboard loads without errors |
+| Page Load | Open http://localhost:5173 | Landing page loads without errors |
+| Enter Dashboard | Click "Enter Dashboard" | Live dashboard loads |
 | Navigation | Click sidebar menu items | Pages switch smoothly |
+| Pipeline Page | Navigate to Pipeline | Shows control panel and live view tabs |
 | Assets Page | Navigate to Assets | Shows asset list (may be empty) |
 | Jobs Page | Navigate to Jobs | Shows job queue status |
 | Settings Page | Navigate to Settings | Shows configuration options |
+| Template Mode | Navigate to /template/dashboard | Shows mock data version |
 
 ---
 
-## 12. End-to-End Integration Test
+## 13. Testing Live Scraper Streaming
 
-### 12.1 Full Stack Test
+### 13.1 Prerequisites
 
-With all services running (Agent API, Dashboard Backend, Dashboard Frontend):
+Ensure all services are running:
+- Node.js Scraper (port 3001)
+- Agent API (port 8080)
+- Dashboard Backend (port 8000)
+- Dashboard Frontend (port 5173)
+
+### 13.2 Test Live View
+
+1. Open browser to **http://localhost:5173**
+2. Click **"Enter Dashboard"**
+3. Navigate to **Pipeline** page from sidebar
+4. Click **"Scrape Assets"** button
+5. Switch to **"Live View"** tab
+6. Watch the browser stream in real-time
+
+**Expected behavior:**
+- Session appears in "Live View" grid
+- Video frames update showing browser activity
+- Status shows "live" with frame count increasing
+- Current URL displayed below video
+
+### 13.3 Test Replay Feature
+
+1. Wait for a scraping job to complete
+2. Switch to **"Replays"** tab on Pipeline page
+3. Click on a session to view saved screenshots
+4. Use playback controls to step through frames
+
+**Expected behavior:**
+- Completed sessions listed with screenshot counts
+- Clicking session shows first screenshot
+- Play/Pause, speed controls work
+- Timeline scrubber navigates frames
+
+### 13.4 Verify Screenshots Saved
+
+```bash
+# Check screenshots directory
+ls -la ./data/screenshots/
+
+# List screenshots for a specific session
+ls -la ./data/screenshots/<session-id>/
+
+# View screenshot metadata
+cat ./data/screenshots/<session-id>/*.json | head -20
+```
+
+---
+
+## 14. End-to-End Integration Test
+
+### 14.1 Full Stack Test
+
+With all services running (Scraper, Agent API, Dashboard Backend, Dashboard Frontend):
 
 ```bash
 ./venv/bin/python << 'EOF'
@@ -701,42 +843,62 @@ async def e2e_test():
     print("END-TO-END INTEGRATION TEST")
     print("=" * 60)
     
-    async with httpx.AsyncClient() as client:
-        # Test 1: Agent API Health
-        print("\n1. Testing Agent API...")
-        resp = await client.get("http://localhost:8081/health")
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        # Test 1: Scraper Health
+        print("\n1. Testing Scraper Server...")
+        resp = await client.get("http://localhost:3001/health")
+        assert resp.status_code == 200, f"Scraper health failed: {resp.status_code}"
+        print(f"   ✅ Scraper Server healthy")
+        
+        # Test 2: Agent API Health
+        print("\n2. Testing Agent API...")
+        resp = await client.get("http://localhost:8080/health")
         assert resp.status_code == 200, f"Agent health failed: {resp.status_code}"
         print(f"   ✅ Agent API healthy")
         
-        # Test 2: Dashboard Backend Health
-        print("\n2. Testing Dashboard Backend...")
+        # Test 3: Dashboard Backend Health
+        print("\n3. Testing Dashboard Backend...")
         resp = await client.get("http://localhost:8000/health")
         assert resp.status_code == 200, f"Dashboard health failed: {resp.status_code}"
         print(f"   ✅ Dashboard Backend healthy")
         
-        # Test 3: Create a job via Agent API
-        print("\n3. Creating scraping job...")
+        # Test 4: Active streaming sessions (via dashboard proxy)
+        print("\n4. Testing streaming endpoint...")
+        resp = await client.get("http://localhost:8000/api/v1/scrapers/active")
+        assert resp.status_code == 200, f"Active sessions failed: {resp.status_code}"
+        sessions = resp.json()
+        print(f"   ✅ Active sessions: {len(sessions.get('sessions', []))}")
+        
+        # Test 5: Create a job via Agent API
+        print("\n5. Creating scraping job...")
         resp = await client.post(
-            "http://localhost:8081/scrape",
-            json={"source": "meta_ad_library", "query": "e2e_test", "max_items": 5}
+            "http://localhost:8080/scrape",
+            json={"source": "wikimedia_commons", "query": "e2e_test", "max_items": 5}
         )
         assert resp.status_code == 200, f"Job creation failed: {resp.status_code}"
         job_data = resp.json()
         print(f"   ✅ Job created: {job_data['job_id'][:8]}...")
         
-        # Test 4: Check queue size
-        print("\n4. Checking queue...")
-        resp = await client.get("http://localhost:8081/queue/size")
+        # Test 6: Check queue size
+        print("\n6. Checking queue...")
+        resp = await client.get("http://localhost:8080/queue/size")
         assert resp.status_code == 200
         queue_size = resp.json()["size"]
         print(f"   ✅ Queue size: {queue_size}")
         
-        # Test 5: Get metrics
-        print("\n5. Getting metrics...")
-        resp = await client.get("http://localhost:8081/metrics")
+        # Test 7: Get metrics
+        print("\n7. Getting metrics...")
+        resp = await client.get("http://localhost:8080/metrics")
         assert resp.status_code == 200
         metrics = resp.json()
         print(f"   ✅ Metrics retrieved")
+        
+        # Test 8: Check sessions with screenshots
+        print("\n8. Checking screenshot sessions...")
+        resp = await client.get("http://localhost:3001/sessions/with-screenshots")
+        assert resp.status_code == 200
+        screenshot_sessions = resp.json()
+        print(f"   ✅ Sessions with screenshots: {screenshot_sessions.get('count', 0)}")
         
     print()
     print("=" * 60)
@@ -763,8 +925,12 @@ After completing all tests, fill in this checklist:
 | Orchestrator | ☐ | |
 | Agent Brain | ☐ | |
 | Agent API | ☐ | |
+| Node.js Scraper | ☐ | |
+| WebSocket Streaming | ☐ | |
 | Dashboard Backend | ☐ | |
 | Dashboard Frontend | ☐ | |
+| Live Scraper View | ☐ | |
+| Replay Feature | ☐ | |
 | E2E Integration | ☐ | |
 
 ---
@@ -773,7 +939,9 @@ After completing all tests, fill in this checklist:
 
 | Service | Start Command | URL |
 |---------|---------------|-----|
-| Agent API | `MODE=local ./venv/bin/uvicorn agent.api:app --port 8081` | http://localhost:8081 |
+| Node.js Scraper | `cd scrapers && nvm use 20 && node server.js` | http://localhost:3001 |
+| Scraper WebSocket | (same as above) | ws://localhost:3001/ws/stream |
+| Agent API | `MODE=local ./venv/bin/uvicorn agent.api:app --port 8080` | http://localhost:8080 |
 | Dashboard Backend | `cd dashboard/backend && uvicorn app.main:app --port 8000` | http://localhost:8000 |
 | Dashboard Frontend | `cd dashboard/frontend && npm run dev` | http://localhost:5173 |
 
@@ -785,9 +953,48 @@ After completing all tests, fill in this checklist:
 # Kill all uvicorn processes
 pkill -f uvicorn
 
+# Kill Node.js scraper
+pkill -f "node server.js"
+
 # Kill frontend dev server
 pkill -f "npm run dev"
 
 # Or use Ctrl+C in each terminal
+```
+
+---
+
+## 🎥 Live Streaming Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                      Dashboard (localhost:5173)                  │
+│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐       │
+│  │  Pipeline    │    │  Live View   │    │   Replays    │       │
+│  │  Controls    │    │  (WebSocket) │    │ (Screenshots)│       │
+│  └──────────────┘    └──────────────┘    └──────────────┘       │
+└────────────┬───────────────┬──────────────────┬─────────────────┘
+             │               │                  │
+             ▼               ▼                  ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                  Dashboard Backend (localhost:8000)              │
+│                     Proxies to Agent + Scraper                   │
+└────────────┬───────────────┬──────────────────┬─────────────────┘
+             │               │                  │
+             ▼               │                  ▼
+┌────────────────────┐       │     ┌────────────────────────────┐
+│   Agent API        │       │     │   Node.js Scraper          │
+│  (localhost:8080)  │───────┼────▶│  (localhost:3001)          │
+│                    │       │     │                            │
+│  - Job triggers    │       │     │  - HTTP: POST /scrape      │
+│  - SSE events      │       │     │  - WS: /ws/stream          │
+│  - Orchestration   │       │     │  - Screenshots: ./data/    │
+└────────────────────┘       │     └─────────────┬──────────────┘
+                             │                   │
+                             │                   ▼
+                             │     ┌────────────────────────────┐
+                             └────▶│   Playwright Browser       │
+                                   │  (CDP Screencast)          │
+                                   └────────────────────────────┘
 ```
 

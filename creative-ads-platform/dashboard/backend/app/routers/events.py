@@ -90,7 +90,7 @@ def get_recent_events(limit: int = 50) -> list:
 # ==========================================================================
 
 @router.get("/stream")
-async def event_stream(request: Request):
+async def event_stream(request: Request, include_history: bool = True):
     """
     Server-Sent Events stream for real-time pipeline updates.
     
@@ -102,6 +102,9 @@ async def event_stream(request: Request):
         console.log(event.type, event.data);
     };
     ```
+    
+    Query params:
+    - include_history: If true, sends recent event history on connect (default: true)
     """
     async def generate():
         queue = asyncio.Queue()
@@ -110,6 +113,11 @@ async def event_stream(request: Request):
         try:
             # Send initial connection event
             yield f"data: {json.dumps({'type': 'connected', 'data': {'message': 'Connected to event stream'}, 'timestamp': datetime.utcnow().isoformat()})}\n\n"
+            
+            # Send recent event history so clients don't miss events when navigating
+            if include_history and _event_history:
+                for event in _event_history[-20:]:  # Last 20 events
+                    yield f"data: {event.model_dump_json()}\n\n"
             
             while True:
                 # Check if client disconnected

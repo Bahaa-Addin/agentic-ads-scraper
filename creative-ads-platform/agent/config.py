@@ -186,6 +186,9 @@ class Config:
     dashboard_port: int = 8080
     api_port: int = 8081
     
+    # Node.js Scraper Service URL
+    scraper_api_url: str = "http://localhost:3001"
+    
     @property
     def is_local(self) -> bool:
         """Check if running in local mode."""
@@ -233,6 +236,7 @@ class Config:
             log_level=os.environ.get("LOG_LEVEL", "INFO"),
             dashboard_port=int(os.environ.get("DASHBOARD_PORT", "8080")),
             api_port=int(os.environ.get("API_PORT", "8081")),
+            scraper_api_url=os.environ.get("SCRAPER_API_URL", "http://localhost:3001"),
         )
         
         # Configure mode-specific settings

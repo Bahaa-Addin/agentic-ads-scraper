@@ -145,21 +145,67 @@ async def get_active_scrapers():
     """
     Get list of active scraper streaming sessions.
     
-    Proxies to the agent API to get currently running scraper sessions
-    that are streaming video.
+    Proxies to the Node.js scraper service to get currently running 
+    scraper sessions that are streaming video.
     """
     settings = get_settings()
-    agent_url = getattr(settings, 'agent_api_url', None) or 'http://localhost:8080'
+    scraper_url = settings.scraper_api_url
     
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
-            response = await client.get(f"{agent_url}/api/v1/scrapers/active")
+            response = await client.get(f"{scraper_url}/sessions/active")
             if response.status_code == 200:
                 return response.json()
             else:
-                logger.warning(f"Agent returned status {response.status_code}")
+                logger.warning(f"Scraper service returned status {response.status_code}")
                 return {"sessions": []}
     except httpx.RequestError as e:
-        logger.debug(f"Could not connect to agent API: {e}")
+        logger.debug(f"Could not connect to scraper service: {e}")
         return {"sessions": []}
+
+
+@router.get("/sessions/with-screenshots")
+async def get_sessions_with_screenshots():
+    """
+    Get list of session IDs that have screenshots available for replay.
+    
+    Proxies to the Node.js scraper service.
+    """
+    settings = get_settings()
+    scraper_url = settings.scraper_api_url
+    
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(f"{scraper_url}/sessions/with-screenshots")
+            if response.status_code == 200:
+                return response.json()
+            else:
+                logger.warning(f"Scraper service returned status {response.status_code}")
+                return {"sessions": [], "count": 0}
+    except httpx.RequestError as e:
+        logger.debug(f"Could not connect to scraper service: {e}")
+        return {"sessions": [], "count": 0}
+
+
+@router.get("/sessions/{session_id}/screenshots")
+async def get_session_screenshots(session_id: str):
+    """
+    Get list of screenshots for a specific session.
+    
+    Proxies to the Node.js scraper service.
+    """
+    settings = get_settings()
+    scraper_url = settings.scraper_api_url
+    
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(f"{scraper_url}/sessions/{session_id}/screenshots")
+            if response.status_code == 200:
+                return response.json()
+            else:
+                logger.warning(f"Scraper service returned status {response.status_code}")
+                return {"session_id": session_id, "count": 0, "screenshots": []}
+    except httpx.RequestError as e:
+        logger.debug(f"Could not connect to scraper service: {e}")
+        return {"session_id": session_id, "count": 0, "screenshots": []}
 

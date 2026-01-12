@@ -11,6 +11,7 @@ Adapters are injected at runtime by the Orchestrator.
 
 import asyncio
 import logging
+import os
 import subprocess
 import json
 from datetime import datetime, timedelta
@@ -407,8 +408,14 @@ class AgentBrain:
                 cmd.extend(["--filters", json.dumps(filters)])
             
             # Apply low-RAM limits
+            # Note: filters may contain "max_items" (snake_case) from schedule_scraping_batch
+            # or "maxItems" (camelCase) from external calls, so check both
+            max_items_value = (
+                filters.get("maxItems") if "maxItems" in filters
+                else filters.get("max_items", 100)
+            )
             max_items = min(
-                filters.get("maxItems", 100),
+                max_items_value,
                 self.config.low_ram.global_job_cap
             )
             cmd.extend(["--max-items", str(max_items)])
@@ -497,10 +504,16 @@ class AgentBrain:
         # Report health status
         from .interfaces.monitoring import HealthStatus
         
+        # Queue health: healthy if no jobs, or if failure rate is acceptable
+        queue_healthy = (
+            queue_metrics.total_jobs == 0 or
+            queue_metrics.failed_jobs < queue_metrics.total_jobs * 0.1
+        )
+        
         await self.monitoring.report_health(HealthStatus(
             healthy=self._metrics.errors < 10,
             components={
-                "queue": queue_metrics.failed_jobs < queue_metrics.total_jobs * 0.1,
+                "queue": queue_healthy,
                 "storage": True,  # Assume healthy if no exceptions
                 "llm": self.llm.is_available(),
             },
@@ -583,7 +596,3 @@ class AgentBrain:
             "job_ids": job_ids,
             "total_jobs": len(job_ids),
         }
-
-
-# Import os for path operations
-import os

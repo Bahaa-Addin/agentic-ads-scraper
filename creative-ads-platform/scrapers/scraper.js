@@ -15,6 +15,7 @@
 import { chromium } from 'playwright';
 import { program } from 'commander';
 import dotenv from 'dotenv';
+import { v4 as uuidv4 } from 'uuid';
 import {
   logger,
   RateLimiter,
@@ -40,20 +41,40 @@ dotenv.config();
 // ============================================================================
 
 class BaseScraper {
-  constructor(config) {
+  constructor(config, options = {}) {
     this.config = config;
     this.browser = null;
     this.context = null;
+    this.mainPage = null; // Main page for streaming
     this.rateLimiter = new RateLimiter(config.rateLimit || 60);
     this.results = [];
     this.errors = [];
+    
+    // Streaming options
+    this.streamingEnabled = options.streaming ?? false;
+    this.headless = options.headless ?? (process.env.HEADLESS !== 'false');
+    this.sessionId = options.sessionId || uuidv4();
+    this.jobId = options.jobId || null;
+    this.streamManager = options.streamManager || null;
+    this.screenshotCount = 0;
+    
+    logger.info('BaseScraper created', {
+      source: config.name,
+      sessionId: this.sessionId,
+      streaming: this.streamingEnabled,
+      headless: this.headless
+    });
   }
 
   async initialize() {
-    logger.info(`Initializing ${this.config.name} scraper`);
+    logger.info(`Initializing ${this.config.name} scraper`, {
+      sessionId: this.sessionId,
+      streaming: this.streamingEnabled,
+      headless: this.headless
+    });
     
     this.browser = await chromium.launch({
-      headless: process.env.HEADLESS !== 'false',
+      headless: this.headless,
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
@@ -63,31 +84,78 @@ class BaseScraper {
     });
 
     this.context = await this.browser.newContext({
-      viewport: { width: 1920, height: 1080 },
+      viewport: { width: 1280, height: 720 },
       userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       locale: 'en-US',
       timezoneId: 'America/New_York'
     });
 
-    // Block unnecessary resources for faster scraping
-    await this.context.route('**/*', (route) => {
-      const resourceType = route.request().resourceType();
-      if (['font', 'stylesheet'].includes(resourceType)) {
-        route.abort();
-      } else {
-        route.continue();
-      }
-    });
+    // Don't block stylesheets when streaming (better visuals)
+    if (!this.streamingEnabled) {
+      await this.context.route('**/*', (route) => {
+        const resourceType = route.request().resourceType();
+        if (['font', 'stylesheet'].includes(resourceType)) {
+          route.abort();
+        } else {
+          route.continue();
+        }
+      });
+    }
+
+    // Create main page for streaming
+    this.mainPage = await this.context.newPage();
+    
+    // Start screencast if streaming is enabled
+    if (this.streamingEnabled && this.streamManager) {
+      await this.streamManager.startScreencast(this.sessionId, this.mainPage, {
+        jobId: this.jobId,
+        source: this.config.name
+      });
+      logger.info('Screencast started', { sessionId: this.sessionId });
+    }
   }
 
   async close() {
+    // Stop screencast if streaming
+    if (this.streamingEnabled && this.streamManager) {
+      await this.streamManager.stopScreencast(this.sessionId);
+      this.screenshotCount = this.streamManager.getSessionInfo(this.sessionId)?.screenshot_count || 0;
+      logger.info('Screencast stopped', { 
+        sessionId: this.sessionId,
+        screenshotCount: this.screenshotCount 
+      });
+    }
+    
+    if (this.mainPage) {
+      await this.mainPage.close();
+    }
     if (this.context) {
       await this.context.close();
     }
     if (this.browser) {
       await this.browser.close();
     }
-    logger.info(`Closed ${this.config.name} scraper`);
+    logger.info(`Closed ${this.config.name} scraper`, { sessionId: this.sessionId });
+  }
+
+  /**
+   * Get the page to use for scraping.
+   * Returns mainPage for streaming mode, or creates a new page otherwise.
+   */
+  async getScrapingPage() {
+    if (this.streamingEnabled && this.mainPage) {
+      return this.mainPage;
+    }
+    return await this.context.newPage();
+  }
+
+  /**
+   * Close a scraping page if it's not the main streaming page.
+   */
+  async closeScrapingPage(page) {
+    if (page !== this.mainPage) {
+      await page.close();
+    }
   }
 
   async scrape(query, filters = {}) {
@@ -116,17 +184,17 @@ class BaseScraper {
 // ============================================================================
 
 class MetaAdLibraryScraper extends BaseScraper {
-  constructor() {
-    super(SCRAPER_SOURCES.META_AD_LIBRARY);
+  constructor(options = {}) {
+    super(SCRAPER_SOURCES.META_AD_LIBRARY, options);
   }
 
   async scrape(query, filters = {}) {
-    const page = await this.context.newPage();
+    const page = await this.getScrapingPage();
     const ads = [];
 
     try {
       const searchUrl = this.buildSearchUrl(query, filters);
-      logger.info('Scraping Meta Ad Library', { url: searchUrl });
+      logger.info('Scraping Meta Ad Library', { url: searchUrl, sessionId: this.sessionId });
 
       await this.rateLimiter.acquire();
       await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
@@ -149,7 +217,7 @@ class MetaAdLibraryScraper extends BaseScraper {
 
       // Extract ad data
       const adElements = await page.$$(this.config.selectors.adCard);
-      logger.info(`Found ${adElements.length} ad elements`);
+      logger.info(`Found ${adElements.length} ad elements`, { sessionId: this.sessionId });
 
       for (const element of adElements.slice(0, filters.maxItems || 100)) {
         try {
@@ -172,7 +240,7 @@ class MetaAdLibraryScraper extends BaseScraper {
       logger.error('Meta Ad Library scraping failed', { error: error.message });
       throw error;
     } finally {
-      await page.close();
+      await this.closeScrapingPage(page);
     }
 
     return ads;
@@ -244,17 +312,17 @@ class MetaAdLibraryScraper extends BaseScraper {
 // ============================================================================
 
 class GoogleAdsTransparencyScraper extends BaseScraper {
-  constructor() {
-    super(SCRAPER_SOURCES.GOOGLE_ADS_TRANSPARENCY);
+  constructor(options = {}) {
+    super(SCRAPER_SOURCES.GOOGLE_ADS_TRANSPARENCY, options);
   }
 
   async scrape(query, filters = {}) {
-    const page = await this.context.newPage();
+    const page = await this.getScrapingPage();
     const ads = [];
 
     try {
       const searchUrl = this.buildSearchUrl(query, filters);
-      logger.info('Scraping Google Ads Transparency Center', { url: searchUrl });
+      logger.info('Scraping Google Ads Transparency Center', { url: searchUrl, sessionId: this.sessionId });
 
       await this.rateLimiter.acquire();
       await page.goto(searchUrl, { waitUntil: 'networkidle', timeout: 60000 });
@@ -303,7 +371,7 @@ class GoogleAdsTransparencyScraper extends BaseScraper {
       logger.error('Google Ads Transparency scraping failed', { error: error.message });
       throw error;
     } finally {
-      await page.close();
+      await this.closeScrapingPage(page);
     }
 
     return ads;
@@ -323,17 +391,17 @@ class GoogleAdsTransparencyScraper extends BaseScraper {
 // ============================================================================
 
 class InternetArchiveScraper extends BaseScraper {
-  constructor() {
-    super(SCRAPER_SOURCES.INTERNET_ARCHIVE);
+  constructor(options = {}) {
+    super(SCRAPER_SOURCES.INTERNET_ARCHIVE, options);
   }
 
   async scrape(query, filters = {}) {
-    const page = await this.context.newPage();
+    const page = await this.getScrapingPage();
     const ads = [];
 
     try {
       const searchUrl = this.buildSearchUrl(query, filters);
-      logger.info('Scraping Internet Archive', { url: searchUrl });
+      logger.info('Scraping Internet Archive', { url: searchUrl, sessionId: this.sessionId });
 
       await this.rateLimiter.acquire();
       await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
@@ -344,7 +412,7 @@ class InternetArchiveScraper extends BaseScraper {
 
       // Extract items
       const items = await page.$$(this.config.selectors.adCard);
-      logger.info(`Found ${items.length} archive items`);
+      logger.info(`Found ${items.length} archive items`, { sessionId: this.sessionId });
 
       for (const item of items.slice(0, filters.maxItems || 100)) {
         try {
@@ -384,7 +452,7 @@ class InternetArchiveScraper extends BaseScraper {
       logger.error('Internet Archive scraping failed', { error: error.message });
       throw error;
     } finally {
-      await page.close();
+      await this.closeScrapingPage(page);
     }
 
     return ads;
@@ -405,17 +473,17 @@ class InternetArchiveScraper extends BaseScraper {
 // ============================================================================
 
 class WikimediaCommonsScraper extends BaseScraper {
-  constructor() {
-    super(SCRAPER_SOURCES.WIKIMEDIA_COMMONS);
+  constructor(options = {}) {
+    super(SCRAPER_SOURCES.WIKIMEDIA_COMMONS, options);
   }
 
   async scrape(query, filters = {}) {
-    const page = await this.context.newPage();
+    const page = await this.getScrapingPage();
     const ads = [];
 
     try {
       const searchUrl = this.buildSearchUrl(query, filters);
-      logger.info('Scraping Wikimedia Commons', { url: searchUrl });
+      logger.info('Scraping Wikimedia Commons', { url: searchUrl, sessionId: this.sessionId });
 
       await this.rateLimiter.acquire();
       await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
@@ -423,7 +491,7 @@ class WikimediaCommonsScraper extends BaseScraper {
 
       // Extract gallery items
       const items = await page.$$(this.config.selectors.fileCard);
-      logger.info(`Found ${items.length} Wikimedia items`);
+      logger.info(`Found ${items.length} Wikimedia items`, { sessionId: this.sessionId });
 
       for (const item of items.slice(0, filters.maxItems || 100)) {
         try {
@@ -463,7 +531,7 @@ class WikimediaCommonsScraper extends BaseScraper {
       logger.error('Wikimedia Commons scraping failed', { error: error.message });
       throw error;
     } finally {
-      await page.close();
+      await this.closeScrapingPage(page);
     }
 
     return ads;
@@ -479,16 +547,26 @@ class WikimediaCommonsScraper extends BaseScraper {
 // Scraper Factory
 // ============================================================================
 
-function createScraper(source) {
+/**
+ * Create a scraper instance for the given source.
+ * @param {string} source - Scraper source name
+ * @param {object} options - Scraper options
+ * @param {boolean} options.streaming - Enable CDP screencast streaming
+ * @param {boolean} options.headless - Run in headless mode
+ * @param {string} options.sessionId - Unique session ID for streaming
+ * @param {string} options.jobId - Job ID for tracking
+ * @param {StreamManager} options.streamManager - StreamManager instance
+ */
+function createScraper(source, options = {}) {
   switch (source) {
     case 'meta_ad_library':
-      return new MetaAdLibraryScraper();
+      return new MetaAdLibraryScraper(options);
     case 'google_ads_transparency':
-      return new GoogleAdsTransparencyScraper();
+      return new GoogleAdsTransparencyScraper(options);
     case 'internet_archive':
-      return new InternetArchiveScraper();
+      return new InternetArchiveScraper(options);
     case 'wikimedia_commons':
-      return new WikimediaCommonsScraper();
+      return new WikimediaCommonsScraper(options);
     default:
       throw new Error(`Unknown scraper source: ${source}`);
   }

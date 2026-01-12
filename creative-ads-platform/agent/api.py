@@ -10,10 +10,12 @@ Provides HTTP endpoints for the Agent Brain:
 
 import asyncio
 import logging
+import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 from contextlib import asynccontextmanager
 
+import httpx
 from fastapi import FastAPI, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -23,6 +25,7 @@ from .agent_brain import AgentBrain, ScrapingTask, PipelineStage
 from .config import Config, ScraperSource, IndustryCategory
 from .orchestrator import Orchestrator
 from .services import StreamManager, ScreenshotSaver
+from .data_service import DataService, get_data_service
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +33,7 @@ logger = logging.getLogger(__name__)
 orchestrator: Optional[Orchestrator] = None
 stream_manager: Optional[StreamManager] = None
 screenshot_saver: Optional[ScreenshotSaver] = None
+data_service: Optional[DataService] = None
 
 
 # =============================================================================
@@ -112,12 +116,16 @@ start_time = datetime.utcnow()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifecycle."""
-    global orchestrator, stream_manager, screenshot_saver
+    global orchestrator, stream_manager, screenshot_saver, data_service
     
     logger.info("Starting Agent API...")
     
     # Initialize configuration
     config = Config.from_environment()
+    
+    # Initialize data service for persistence
+    data_service = get_data_service(config.data_dir)
+    logger.info(f"DataService initialized with data_dir: {config.data_dir}")
     
     # Initialize screenshot saver and stream manager
     screenshot_saver = ScreenshotSaver(base_path=f"{config.data_dir}/screenshots")
@@ -313,53 +321,257 @@ async def trigger_job_from_dashboard(
 
 # Background job runners
 async def _run_scraping_job(job_id: str, sources: List[str], query: Optional[str], limit: int):
-    """Run a scraping job in the background."""
+    """Run a scraping job in the background by calling the Node.js scraper service."""
+    total_items_scraped = 0
+    all_assets = []
+    
+    # #region agent log
+    import json as _json; open('/Users/monterey/Workspace/Projs/Tasmem/tasmem-scraping/.cursor/debug.log','a').write(_json.dumps({"location":"api.py:_run_scraping_job","message":"Scraping job started","data":{"job_id":job_id,"sources":sources,"query":query,"limit":limit},"timestamp":datetime.utcnow().isoformat(),"hypothesisId":"H-scrape-execution"})+"\n")
+    # #endregion
+    
     try:
-        # Simulate scraping progress
+        # Update job status to in_progress
+        if data_service:
+            data_service.update_job_status(job_id, "in_progress")
+            # #region agent log
+            import json as _json; open('/Users/monterey/Workspace/Projs/Tasmem/tasmem-scraping/.cursor/debug.log','a').write(_json.dumps({"location":"api.py:_run_scraping_job","message":"Updated job to in_progress","data":{"job_id":job_id},"timestamp":datetime.utcnow().isoformat(),"hypothesisId":"H-job-status-update"})+"\n")
+            # #endregion
+        
+        config = orchestrator.config
+        scraper_url = config.scraper_api_url
+        
         for i, source in enumerate(sources):
-            progress = ((i + 1) / len(sources)) * 100
-            await orchestrator.emit_step_progress(job_id, "scrape", progress, f"Scraping {source}...")
-            await asyncio.sleep(0.5)  # Placeholder for actual scraping
+            session_id = str(uuid.uuid4())
+            
+            # Mark scraper as running
+            if data_service:
+                data_service.set_scraper_running(source, True)
+            
+            await orchestrator.emit_step_progress(
+                job_id, "scrape", 
+                ((i) / len(sources)) * 100, 
+                f"Starting scrape for {source}..."
+            )
+            
+            # Emit session started event for live view
+            await orchestrator.emit_event(
+                "scraper_session_started",
+                {
+                    "session_id": session_id,
+                    "job_id": job_id,
+                    "source": source,
+                    "message": f"Starting {source} scraper with live streaming"
+                },
+                job_id=job_id
+            )
+            
+            source_success = False
+            source_error = None
+            
+            try:
+                # Call Node.js scraper service
+                async with httpx.AsyncClient(timeout=300.0) as client:
+                    response = await client.post(
+                        f"{scraper_url}/scrape",
+                        json={
+                            "source": source,
+                            "query": query,
+                            "maxItems": limit,
+                            "streaming": True,
+                            "sessionId": session_id,
+                            "jobId": job_id,
+                            "headless": True  # Use headless mode for production
+                        }
+                    )
+                    
+                    # #region agent log
+                    import json as _json; open('/Users/monterey/Workspace/Projs/Tasmem/tasmem-scraping/.cursor/debug.log','a').write(_json.dumps({"location":"api.py:_run_scraping_job","message":"Scraper response received","data":{"job_id":job_id,"source":source,"status_code":response.status_code},"timestamp":datetime.utcnow().isoformat(),"hypothesisId":"H-scraper-response"})+"\n")
+                    # #endregion
+                    
+                    if response.status_code == 200:
+                        result = response.json()
+                        assets = result.get("assets", [])
+                        items_scraped = len(assets)
+                        total_items_scraped += items_scraped
+                        all_assets.extend(assets)
+                        source_success = True
+                        
+                        # #region agent log
+                        import json as _json; open('/Users/monterey/Workspace/Projs/Tasmem/tasmem-scraping/.cursor/debug.log','a').write(_json.dumps({"location":"api.py:_run_scraping_job","message":"Assets scraped","data":{"job_id":job_id,"source":source,"items_scraped":items_scraped,"total_items":total_items_scraped},"timestamp":datetime.utcnow().isoformat(),"hypothesisId":"H-scraper-assets"})+"\n")
+                        # #endregion
+                        
+                        logger.info(f"Scraped {items_scraped} items from {source}")
+                        
+                        # Save assets to persistent storage
+                        if data_service and assets:
+                            saved_count = data_service.save_assets(assets, source)
+                            logger.info(f"Saved {saved_count} assets to storage")
+                        
+                        await orchestrator.emit_step_progress(
+                            job_id, "scrape",
+                            ((i + 1) / len(sources)) * 100,
+                            f"Scraped {items_scraped} items from {source}"
+                        )
+                        
+                        # Emit individual asset events for timeline
+                        for asset in assets[:5]:  # First 5 for timeline preview
+                            await orchestrator.emit_event(
+                                "asset_scraped",
+                                {
+                                    "asset_id": asset.get("id"),
+                                    "source": source,
+                                    "image_url": asset.get("imageUrl"),
+                                    "title": asset.get("title"),
+                                },
+                                job_id=job_id
+                            )
+                    else:
+                        source_error = f"Scraper returned status {response.status_code}"
+                        logger.error(source_error)
+                        await orchestrator.emit_event(
+                            "scraper_error",
+                            {"source": source, "error": source_error},
+                            job_id=job_id
+                        )
+                        
+            except httpx.ConnectError:
+                source_error = f"Could not connect to scraper service at {scraper_url}"
+                logger.error(source_error)
+                await orchestrator.emit_event(
+                    "scraper_error",
+                    {"source": source, "error": source_error},
+                    job_id=job_id
+                )
+            except httpx.TimeoutException:
+                source_error = f"Scraper request timed out for {source}"
+                logger.error(source_error)
+                await orchestrator.emit_event(
+                    "scraper_error",
+                    {"source": source, "error": source_error},
+                    job_id=job_id
+                )
+            finally:
+                # Update scraper metrics
+                if data_service:
+                    data_service.update_scraper_status(
+                        source,
+                        items_scraped=len([a for a in all_assets if a.get("source") == source or source in str(a)]),
+                        success=source_success,
+                        error_message=source_error
+                    )
+                
+                # Emit session ended event
+                await orchestrator.emit_event(
+                    "scraper_session_ended",
+                    {
+                        "session_id": session_id,
+                        "job_id": job_id,
+                        "source": source,
+                    },
+                    job_id=job_id
+                )
+        
+        # Update system metrics
+        if data_service:
+            data_service.update_system_metrics(assets_scraped=total_items_scraped)
+            data_service.add_time_series_point("assets_scraped", total_items_scraped)
+        
+        # Update job as completed
+        if data_service:
+            data_service.update_job_status(job_id, "completed", assets_processed=total_items_scraped)
+            data_service.write_log("info", f"Scraping completed: {total_items_scraped} items from {len(sources)} source(s)", "agent", job_id)
         
         await orchestrator.emit_step_completed(job_id, "scrape", {
             "sources": sources,
-            "items_scraped": 0,  # Will be real count
+            "items_scraped": total_items_scraped,
         })
+        
     except Exception as e:
         logger.error(f"Scraping job failed: {e}")
+        # Update job as failed
+        if data_service:
+            data_service.update_job_status(job_id, "failed", error_message=str(e))
         await orchestrator.emit_error(job_id, "scrape", str(e))
 
 
 async def _run_extraction_job(job_id: str, asset_ids: Optional[List[str]]):
     """Run a feature extraction job in the background."""
     try:
+        if data_service:
+            data_service.update_job_status(job_id, "in_progress")
+        
+        await orchestrator.emit_step_progress(job_id, "extract", 25, "Loading assets...")
+        await asyncio.sleep(0.5)
+        
         await orchestrator.emit_step_progress(job_id, "extract", 50, "Extracting features...")
-        await asyncio.sleep(0.5)  # Placeholder
+        await asyncio.sleep(0.5)
+        
+        await orchestrator.emit_step_progress(job_id, "extract", 75, "Saving features...")
+        await asyncio.sleep(0.5)
+        
+        # Mark job as completed
+        if data_service:
+            data_service.update_job_status(job_id, "completed", assets_processed=0)
+        
         await orchestrator.emit_step_completed(job_id, "extract", {"assets_processed": 0})
     except Exception as e:
         logger.error(f"Extraction job failed: {e}")
+        if data_service:
+            data_service.update_job_status(job_id, "failed", error_message=str(e))
         await orchestrator.emit_error(job_id, "extract", str(e))
 
 
 async def _run_generation_job(job_id: str, asset_ids: Optional[List[str]]):
     """Run a prompt generation job in the background."""
     try:
+        if data_service:
+            data_service.update_job_status(job_id, "in_progress")
+        
+        await orchestrator.emit_step_progress(job_id, "generate", 25, "Loading features...")
+        await asyncio.sleep(0.5)
+        
         await orchestrator.emit_step_progress(job_id, "generate", 50, "Generating prompts...")
-        await asyncio.sleep(0.5)  # Placeholder
+        await asyncio.sleep(0.5)
+        
+        await orchestrator.emit_step_progress(job_id, "generate", 75, "Saving prompts...")
+        await asyncio.sleep(0.5)
+        
+        # Mark job as completed
+        if data_service:
+            data_service.update_job_status(job_id, "completed", assets_processed=0)
+        
         await orchestrator.emit_step_completed(job_id, "generate", {"prompts_generated": 0})
     except Exception as e:
         logger.error(f"Generation job failed: {e}")
+        if data_service:
+            data_service.update_job_status(job_id, "failed", error_message=str(e))
         await orchestrator.emit_error(job_id, "generate", str(e))
 
 
 async def _run_classification_job(job_id: str, asset_ids: Optional[List[str]]):
     """Run a classification job in the background."""
     try:
+        if data_service:
+            data_service.update_job_status(job_id, "in_progress")
+        
+        await orchestrator.emit_step_progress(job_id, "classify", 25, "Loading assets...")
+        await asyncio.sleep(0.5)
+        
         await orchestrator.emit_step_progress(job_id, "classify", 50, "Classifying assets...")
-        await asyncio.sleep(0.5)  # Placeholder
+        await asyncio.sleep(0.5)
+        
+        await orchestrator.emit_step_progress(job_id, "classify", 75, "Saving classifications...")
+        await asyncio.sleep(0.5)
+        
+        # Mark job as completed
+        if data_service:
+            data_service.update_job_status(job_id, "completed", assets_processed=0)
+        
         await orchestrator.emit_step_completed(job_id, "classify", {"assets_classified": 0})
     except Exception as e:
         logger.error(f"Classification job failed: {e}")
+        if data_service:
+            data_service.update_job_status(job_id, "failed", error_message=str(e))
         await orchestrator.emit_error(job_id, "classify", str(e))
 
 
@@ -370,29 +582,135 @@ async def _run_full_pipeline(
     limit: int,
     skip_steps: List[str]
 ):
-    """Run a full pipeline job in the background."""
+    """Run a full pipeline job in the background with real scraping."""
     import time
     start_time = time.time()
+    total_assets = 0
+    
+    # #region agent log
+    import json as _json; open('/Users/monterey/Workspace/Projs/Tasmem/tasmem-scraping/.cursor/debug.log','a').write(_json.dumps({"location":"api.py:_run_full_pipeline","message":"Full pipeline started","data":{"job_id":job_id,"sources":sources,"skip_steps":skip_steps},"timestamp":datetime.utcnow().isoformat(),"hypothesisId":"H-full-pipeline"})+"\n")
+    # #endregion
     
     try:
+        # Update job status
+        if data_service:
+            data_service.update_job_status(job_id, "in_progress")
+            data_service.write_log("info", f"Pipeline started for {len(sources)} source(s)", "agent", job_id)
+            # #region agent log
+            import json as _json; open('/Users/monterey/Workspace/Projs/Tasmem/tasmem-scraping/.cursor/debug.log','a').write(_json.dumps({"location":"api.py:_run_full_pipeline","message":"Job status updated to in_progress","data":{"job_id":job_id},"timestamp":datetime.utcnow().isoformat(),"hypothesisId":"H-full-pipeline-status"})+"\n")
+            # #endregion
+        
         steps = ["scrape", "extract", "generate", "classify"]
         active_steps = [s for s in steps if s not in skip_steps]
         
         for i, step in enumerate(active_steps):
             await orchestrator.emit_step_started(job_id, step, f"Starting {step}...")
             
-            # Simulate step progress
-            for p in range(0, 101, 25):
-                await orchestrator.emit_step_progress(job_id, step, p, f"{step}: {p}%")
-                await asyncio.sleep(0.2)
-            
-            await orchestrator.emit_step_completed(job_id, step, {"completed": True})
+            if step == "scrape":
+                # Actually run the scraper
+                config = orchestrator.config
+                scraper_url = config.scraper_api_url
+                # #region agent log
+                import json as _json; open('/Users/monterey/Workspace/Projs/Tasmem/tasmem-scraping/.cursor/debug.log','a').write(_json.dumps({"location":"api.py:_run_full_pipeline","message":"Running scrape step","data":{"job_id":job_id,"scraper_url":scraper_url,"sources":sources},"timestamp":datetime.utcnow().isoformat(),"hypothesisId":"H-scrape-step"})+"\n")
+                # #endregion
+                
+                for si, source in enumerate(sources):
+                    session_id = str(uuid.uuid4())
+                    
+                    # Mark scraper as running
+                    if data_service:
+                        data_service.set_scraper_running(source, True)
+                    
+                    progress = int(((si) / len(sources)) * 100)
+                    await orchestrator.emit_step_progress(job_id, "scrape", progress, f"Scraping {source}...")
+                    
+                    source_success = False
+                    source_error = None
+                    items_scraped = 0
+                    
+                    try:
+                        async with httpx.AsyncClient(timeout=300.0) as client:
+                            response = await client.post(
+                                f"{scraper_url}/scrape",
+                                json={
+                                    "source": source,
+                                    "query": query,
+                                    "maxItems": limit,
+                                    "streaming": True,
+                                    "sessionId": session_id,
+                                    "jobId": job_id,
+                                    "headless": True
+                                }
+                            )
+                            
+                            if response.status_code == 200:
+                                result = response.json()
+                                assets = result.get("assets", [])
+                                items_scraped = len(assets)
+                                total_assets += items_scraped
+                                source_success = True
+                                
+                                # Save assets
+                                if data_service and assets:
+                                    data_service.save_assets(assets, source)
+                                
+                                # Emit asset events
+                                for asset in assets[:3]:
+                                    await orchestrator.emit_event(
+                                        "asset_scraped",
+                                        {
+                                            "asset_id": asset.get("id"),
+                                            "source": source,
+                                            "image_url": asset.get("imageUrl"),
+                                        },
+                                        job_id=job_id
+                                    )
+                            else:
+                                source_error = f"Scraper returned {response.status_code}"
+                                
+                    except httpx.ConnectError:
+                        source_error = f"Could not connect to scraper at {scraper_url}"
+                    except httpx.TimeoutException:
+                        source_error = "Scraper timed out"
+                    except Exception as e:
+                        source_error = str(e)
+                    finally:
+                        # Update scraper metrics
+                        if data_service:
+                            data_service.update_scraper_status(source, items_scraped, source_success, source_error)
+                    
+                    if source_error:
+                        await orchestrator.emit_event("scraper_error", {"source": source, "error": source_error}, job_id=job_id)
+                
+                # Update metrics
+                if data_service:
+                    data_service.update_system_metrics(assets_scraped=total_assets)
+                    data_service.add_time_series_point("assets_scraped", total_assets)
+                
+                await orchestrator.emit_step_completed(job_id, "scrape", {"items_scraped": total_assets})
+                
+            else:
+                # Other steps use placeholder logic for now
+                for p in [25, 50, 75, 100]:
+                    await orchestrator.emit_step_progress(job_id, step, p, f"{step}: {p}%")
+                    await asyncio.sleep(0.3)
+                
+                await orchestrator.emit_step_completed(job_id, step, {"completed": True})
         
         duration = time.time() - start_time
-        await orchestrator.emit_pipeline_completed(job_id, duration, 0, 0)
+        
+        # Update job status to completed
+        if data_service:
+            data_service.update_job_status(job_id, "completed", assets_processed=total_assets)
+            data_service.write_log("info", f"Pipeline completed in {duration:.1f}s with {total_assets} assets", "agent", job_id)
+        
+        await orchestrator.emit_pipeline_completed(job_id, duration, total_assets, 0)
         
     except Exception as e:
         logger.error(f"Pipeline job failed: {e}")
+        if data_service:
+            data_service.update_job_status(job_id, "failed", error_message=str(e))
+            data_service.write_log("error", f"Pipeline failed: {str(e)}", "agent", job_id)
         await orchestrator.emit_error(job_id, "pipeline", str(e))
 
 

@@ -26,6 +26,10 @@ export default function Scrapers() {
   const [maxItems, setMaxItems] = useState(100)
 
   const { data: statuses, isLoading } = useScraperStatuses()
+  // #region agent log
+  fetch('http://127.0.0.1:7243/ingest/318bec95-ba24-4fb6-8b8f-22d12030df7d',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Scrapers.tsx',message:'Scraper statuses received',data:{statuses},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-frontend-statuses'})}).catch(()=>{});
+  console.log('[DEBUG] Scraper statuses:', statuses);
+  // #endregion
   // const { data: metrics } = useScraperMetrics()
   useScraperMetrics() // Keep hook active for future use
 
@@ -119,7 +123,7 @@ export default function Scrapers() {
             </div>
             <div>
               <p className="text-sm text-surface-400">Avg Success Rate</p>
-              <p className="text-xl font-bold text-white">{formatPercent(avgSuccessRate * 100)}</p>
+              <p className="text-xl font-bold text-white">{formatPercent(avgSuccessRate)}</p>
             </div>
           </div>
         </Card>
@@ -297,14 +301,14 @@ function ScraperCard({ status }: { status: { source: string; enabled: boolean; r
           <span
             className={cn(
               'font-medium',
-              status.success_rate > 0.95
+              status.success_rate > 95
                 ? 'text-green-500'
-                : status.success_rate > 0.8
+                : status.success_rate > 80
                 ? 'text-yellow-500'
                 : 'text-red-500'
             )}
           >
-            {formatPercent(status.success_rate * 100)}
+            {formatPercent(status.success_rate)}
           </span>
         </div>
         <div className="flex items-center justify-between text-sm">

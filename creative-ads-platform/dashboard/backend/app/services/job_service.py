@@ -183,7 +183,7 @@ class JobService:
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.post(
-                    f"{self.settings.agent_service_url}/trigger",
+                    f"{self.settings.agent_api_url}/trigger",
                     json={
                         "sources": [s.value for s in request.sources],
                         "industries": [i.value for i in request.industries] if request.industries else None,

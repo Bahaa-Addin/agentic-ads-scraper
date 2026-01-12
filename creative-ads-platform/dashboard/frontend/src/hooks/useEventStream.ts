@@ -62,10 +62,18 @@ export function useEventStream(
 
       try {
         const event = JSON.parse(e.data) as PipelineEvent
-        // Skip heartbeat events
-        if (event.type === 'heartbeat') return
+        // Skip heartbeat and connected events
+        if (event.type === 'heartbeat' || event.type === 'connected') return
         
-        setEvents((prev) => [...prev, event])
+        // Deduplicate events by timestamp + type + job_id
+        setEvents((prev) => {
+          const eventKey = `${event.timestamp}-${event.type}-${event.job_id || ''}`
+          const exists = prev.some(e => 
+            `${e.timestamp}-${e.type}-${e.job_id || ''}` === eventKey
+          )
+          if (exists) return prev
+          return [...prev, event]
+        })
       } catch (err) {
         console.error('Failed to parse SSE event:', err)
       }
