@@ -1,3 +1,5 @@
+![Landing page](./platform/dashboard/docs/screenshots/landing.png)
+
 # Agentic Ads Scraper
 
 Agentic Ads Scraper is the repository root for the Agentic Ads Platform: a local-first, cloud-optional system for collecting public advertising creatives, extracting structured features, classifying industries, and generating reusable reverse prompts.
@@ -5,16 +7,6 @@ Agentic Ads Scraper is the repository root for the Agentic Ads Platform: a local
 This repository combines browser automation, Python orchestration, frontend monitoring, validation workflows, and deployment infrastructure in a single project. The application source lives under `platform/`, but this root README is the canonical documentation entry point for the repository.
 
 ## Repository Index
-
-- [Overview](#overview) of the platform summary
-- [Quick Start](#quick-start) for bootstrap and validation
-- [Operating Modes](#operating-modes) for local versus cloud execution
-- [Architecture Snapshot](#architecture-snapshot) and [High-Level System Components](#high-level-system-components) for the runtime structure
-- [Dashboard](#dashboard) for the UI and operational surfaces
-- [Deployment](#deployment) for Docker and Terraform entrypoints
-- [Contributing](#contributing) for workflow and contribution expectations
-
-### Sections:
 
 - [Overview](#overview)
 - [Project Goals](#project-goals)
@@ -347,12 +339,6 @@ The dashboard is the main operational interface for the platform. It covers:
 - logs, health checks, and administrative settings
 
 The screenshot gallery below was captured from the template-mode routes (`/template/*`) so the interface can be reviewed in stable mock-data states.
-
-### Landing Page
-
-![Landing page](./platform/dashboard/docs/screenshots/landing.png)
-
-The landing page introduces the platform, explains the pipeline stages, and links into the main dashboard surfaces.
 
 ### Dashboard Overview
 
